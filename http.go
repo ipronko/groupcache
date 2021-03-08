@@ -24,17 +24,23 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/mailgun/groupcache/v2/consistenthash"
-	pb "github.com/mailgun/groupcache/v2/groupcachepb"
+	"github.com/ipronko/groupcache/consistenthash"
+	"github.com/ipronko/groupcache/view"
 )
 
 const defaultBasePath = "/_groupcache/"
 
 const defaultReplicas = 50
+
+const (
+	sizeHeader   = "X-Size"
+	expireHeader = "X-Expire"
+)
 
 // HTTPPool implements PeerPicker for a pool of HTTP peers.
 type HTTPPool struct {
@@ -191,33 +197,23 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var b []byte
-
-	value := AllocatingByteSliceSink(&b)
-	err := group.Get(ctx, key, value)
+	v, err := group.Get(ctx, key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	view, err := value.view()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	var expireNano int64
-	if !view.e.IsZero() {
-		expireNano = view.Expire().UnixNano()
-	}
+	w.Header().Set(sizeHeader, fmt.Sprintf("%d", v.Len()))
+	w.Header().Set(expireHeader, fmt.Sprintf("%d", v.Expire().Unix()))
 
-	// Write the value to the response body as a proto message.
-	body, err := proto.Marshal(&pb.GetResponse{Value: b, Expire: &expireNano})
+	rc, err := v.Reader()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-protobuf")
-	w.Write(body)
+	defer rc.Close()
+
+	io.Copy(w, rc)
 }
 
 type httpGetter struct {
@@ -226,20 +222,20 @@ type httpGetter struct {
 }
 
 // GetURL
-func (p *httpGetter) GetURL() string {
-	return p.baseURL
+func (h *httpGetter) GetURL() string {
+	return h.baseURL
 }
 
 var bufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
 
-func (h *httpGetter) makeRequest(ctx context.Context, method string, in *pb.GetRequest, out *http.Response) error {
+func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequest, out *http.Response) error {
 	u := fmt.Sprintf(
 		"%v%v/%v",
 		h.baseURL,
-		url.QueryEscape(in.GetGroup()),
-		url.QueryEscape(in.GetKey()),
+		url.QueryEscape(in.Group),
+		url.QueryEscape(in.Key),
 	)
 	req, err := http.NewRequest(method, u, nil)
 	if err != nil {
@@ -262,30 +258,33 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *pb.GetR
 	return nil
 }
 
-func (h *httpGetter) Get(ctx context.Context, in *pb.GetRequest, out *pb.GetResponse) error {
+func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.ReaderView, error) {
 	var res http.Response
 	if err := h.makeRequest(ctx, http.MethodGet, in, &res); err != nil {
-		return err
+		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned: %v", res.Status)
+		return nil, fmt.Errorf("server returned: %v", res.Status)
 	}
-	b := bufferPool.Get().(*bytes.Buffer)
-	b.Reset()
-	defer bufferPool.Put(b)
-	_, err := io.Copy(b, res.Body)
+
+	sizeStr := res.Header.Get(sizeHeader)
+	size, err := strconv.ParseInt(sizeStr, 10, 64)
 	if err != nil {
-		return fmt.Errorf("reading response body: %v", err)
+		return nil, err
 	}
-	err = proto.Unmarshal(b.Bytes(), out)
+
+	timeStr := res.Header.Get(expireHeader)
+	timeInt, err := strconv.ParseInt(timeStr, 10, 64)
 	if err != nil {
-		return fmt.Errorf("decoding response body: %v", err)
+		return nil, err
 	}
-	return nil
+	expTime := time.Unix(timeInt, 0)
+
+	return view.NewReaderView(res.Body, size, expTime), nil
 }
 
-func (h *httpGetter) Remove(ctx context.Context, in *pb.GetRequest) error {
+func (h *httpGetter) Remove(ctx context.Context, in *GetRequest) error {
 	var res http.Response
 	if err := h.makeRequest(ctx, http.MethodDelete, in, &res); err != nil {
 		return err

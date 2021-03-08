@@ -21,13 +21,13 @@ package groupcache
 import (
 	"context"
 
-	pb "github.com/mailgun/groupcache/v2/groupcachepb"
+	"github.com/ipronko/groupcache/view"
 )
 
 // ProtoGetter is the interface that must be implemented by a peer.
 type ProtoGetter interface {
-	Get(context context.Context, in *pb.GetRequest, out *pb.GetResponse) error
-	Remove(context context.Context, in *pb.GetRequest) error
+	Get(context context.Context, in *GetRequest) (*view.ReaderView, error)
+	Remove(context context.Context, in *GetRequest) error
 	// GetURL returns the peer URL
 	GetURL() string
 }

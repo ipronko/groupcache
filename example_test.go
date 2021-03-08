@@ -2,14 +2,21 @@ package groupcache_test
 
 import (
 	"context"
-	"fmt"
+	"crypto/sha1"
+	"encoding/hex"
+	"io"
 	"log"
+	"os"
+	"testing"
 	"time"
 
-	"github.com/mailgun/groupcache/v2"
+	"github.com/ipronko/groupcache"
+	"github.com/ipronko/groupcache/view"
 )
 
-func ExampleUsage() {
+var testFile = "LICENSE"
+
+func Test_ExampleUsage(t *testing.T) {
 	/*
 		// Keep track of peers in our cluster and add our instance to the pool `http://localhost:8080`
 		pool := groupcache.NewHTTPPoolOpts("http://localhost:8080", &groupcache.HTTPPoolOptions{})
@@ -32,44 +39,66 @@ func ExampleUsage() {
 		defer server.Shutdown(context.Background())
 	*/
 
+	file := openFile()
+
+	hash := getHash(file)
+	check(file.Close())
+	size := fileInfo().Size()
+	expTime := time.Now().Add(time.Minute)
+	getCalls := int64(10)
+	cacheHits := int64(9)
+	key := "12345"
+
 	// Create a new group cache with a max cache size of 3MB
-	group := groupcache.NewGroup("users", 3000000, groupcache.GetterFunc(
-		func(ctx context.Context, id string, dest groupcache.Sink) error {
-
-			// In a real scenario we might fetch the value from a database.
-			/*if user, err := fetchUserFromMongo(ctx, id); err != nil {
-				return err
-			}*/
-
-			user := User{
-				Id:      "12345",
-				Name:    "John Doe",
-				Age:     40,
-				IsSuper: true,
+	group := groupcache.NewGroup("users", 3000000, 1024*1024, groupcache.GetterFunc(
+		func(ctx context.Context, id string) (view.View, error) {
+			if id != key {
+				t.Errorf("expected key %s, got %s", key, id)
 			}
-
-			// Set the user in the groupcache to expire after 5 minutes
-			if err := dest.SetProto(&user, time.Now().Add(time.Minute*5)); err != nil {
-				return err
-			}
-			return nil
+			f := openFile()
+			return view.NewReaderView(f, size, expTime), nil
 		},
 	))
-
-	var user User
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := group.Get(ctx, "12345", groupcache.ProtoSink(&user)); err != nil {
-		log.Fatal(err)
+	for i := int64(0); i < getCalls; i++ {
+		v, err := group.Get(ctx, key)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		reader, err := v.Reader()
+		check(err)
+		testHash := getHash(reader)
+		reader.Close()
+
+		if hash != testHash {
+			t.Errorf("not expected hash %s", testHash)
+			return
+		}
+
+		if v.Len() != size {
+			t.Errorf("not expected size %d", v.Len())
+			return
+		}
+
+		if v.Expire() != expTime {
+			t.Errorf("not expected expireTime %s", v.Expire().Round(time.Millisecond))
+			return
+		}
 	}
 
-	fmt.Printf("-- User --\n")
-	fmt.Printf("Id: %s\n", user.Id)
-	fmt.Printf("Name: %s\n", user.Name)
-	fmt.Printf("Age: %d\n", user.Age)
-	fmt.Printf("IsSuper: %t\n", user.IsSuper)
+	if group.Stats.Gets.Get() != getCalls {
+		t.Errorf("not expected num of get calls %d", group.Stats.Gets.Get())
+		return
+	}
+
+	if group.Stats.CacheHits.Get() != cacheHits {
+		t.Errorf("not expected num of cache hits %d", group.Stats.CacheHits.Get())
+		return
+	}
 
 	/*
 		// Remove the key from the groupcache
@@ -78,10 +107,31 @@ func ExampleUsage() {
 			log.Fatal(err)
 		}
 	*/
+}
 
-	// Output: -- User --
-	// Id: 12345
-	// Name: John Doe
-	// Age: 40
-	// IsSuper: true
+func openFile() *os.File {
+	file, err := os.Open(testFile)
+	check(err)
+	return file
+}
+
+func fileInfo() os.FileInfo {
+	stat, err := os.Stat(testFile)
+	check(err)
+	return stat
+}
+
+func getHash(reader io.Reader) string {
+	hashWriter := sha1.New()
+	_, err := io.Copy(hashWriter, reader)
+	check(err)
+
+	sum := hashWriter.Sum(nil)
+	return hex.EncodeToString(sum)
+}
+
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
