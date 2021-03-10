@@ -298,11 +298,6 @@ func (g *Group) Remove(ctx context.Context, key string) error {
 func (g *Group) load(ctx context.Context, key string) (view.View, error) {
 	g.Stats.Loads.Add(1)
 
-	if value, cacheHit := g.lookupCache(key); cacheHit {
-		g.Stats.CacheHits.Add(1)
-		return value, nil
-	}
-
 	g.Stats.LoadsDeduped.Add(1)
 	var value view.View
 	var err error
