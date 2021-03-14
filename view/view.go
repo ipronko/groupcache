@@ -7,13 +7,12 @@ import (
 
 type View interface {
 	Len() int64
-	Expire() time.Time
+	Expire() time.Duration
 	Reader() (io.ReadCloser, error)
 	Type() int
 }
 
 const (
-	FileType = iota
-	ByteType
+	ByteType = iota
 	ReaderType
 )

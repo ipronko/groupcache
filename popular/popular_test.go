@@ -1,7 +1,6 @@
 package popular
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -9,9 +8,7 @@ import (
 )
 
 func TestHitStore_Hit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	store := New(ctx, func(key string) { fmt.Println("delete key", key) }, 2, time.Minute)
+	store := New(2, time.Minute)
 	key := "some"
 	if store.IsPopular(key) {
 		t.Fatal("fist hit must be not popular")
@@ -39,7 +36,7 @@ const (
 // BenchmarkIsPopular/IsPopular
 // BenchmarkIsPopular/IsPopular-12         	 2267925	      1894 ns/op
 func BenchmarkIsPopular(b *testing.B) {
-	store := New(context.Background(), func(key string) { return }, 2, ttl)
+	store := New(2, ttl)
 
 	// Add keys
 	for i := 0; i < benchKeys; i++ {
@@ -53,7 +50,5 @@ func BenchmarkIsPopular(b *testing.B) {
 			store.IsPopular(genKey())
 		}
 	})
-	b.ReportAllocs()
-
 	b.StopTimer()
 }

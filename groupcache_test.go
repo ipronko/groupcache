@@ -30,10 +30,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ipronko/groupcache/cache"
 	"github.com/ipronko/groupcache/view"
 )
 
-//TODO do same tests with reader view type
+// TODO do same tests with reader view type
 var (
 	once                     sync.Once
 	expireGroup, stringGroup Getter
@@ -56,18 +57,24 @@ const (
 )
 
 func testSetup() {
-	stringGroup = NewGroup(stringGroupName, cacheSize, 1024*1024, GetterFunc(func(_ context.Context, key string) (view.View, error) {
+	var err error
+	stringGroup, err = NewMemory(stringGroupName, cacheSize, GetterFunc(func(_ context.Context, key string) (view.View, error) {
 		if key == fromChan {
 			key = <-stringc
 		}
 		cacheFills.Add(1)
-		return view.NewByteView([]byte("ECHO:"+key), time.Time{}), nil
-	}))
-
-	expireGroup = NewGroup(expireGroupName, cacheSize, 1024*1024, GetterFunc(func(_ context.Context, key string) (view.View, error) {
+		return view.NewByteView([]byte("ECHO:"+key), 0), nil
+	}), cache.Options{})
+	if err != nil {
+		panic(err)
+	}
+	expireGroup, err = NewMemory(expireGroupName, cacheSize, GetterFunc(func(_ context.Context, key string) (view.View, error) {
 		cacheFills.Add(1)
-		return view.NewByteView([]byte("ECHO:"+key), time.Now().Add(time.Millisecond*100)), nil
-	}))
+		return view.NewByteView([]byte("ECHO:"+key), time.Millisecond*100), nil
+	}), cache.Options{})
+	if err != nil {
+		panic(err)
+	}
 }
 
 func countFills(f func()) int64 {
@@ -80,6 +87,10 @@ func TestCaching(t *testing.T) {
 	once.Do(testSetup)
 	fills := countFills(func() {
 		for i := 0; i < 10; i++ {
+			// Need some time to set cache
+			if i == 1 {
+				time.Sleep(time.Millisecond * 10)
+			}
 			if _, err := stringGroup.Get(dummyCtx, "TestCaching-key"); err != nil {
 				t.Fatal(err)
 			}
@@ -94,24 +105,28 @@ func TestCachingExpire(t *testing.T) {
 	once.Do(testSetup)
 	fills := countFills(func() {
 		for i := 0; i < 3; i++ {
-			if _, err := expireGroup.Get(dummyCtx, "TestCachingExpire-key"); err != nil {
-				t.Fatal(err)
-			}
 			if i == 1 {
 				time.Sleep(time.Millisecond * 150)
+			}
+			if _, err := expireGroup.Get(dummyCtx, "TestCachingExpire-key"); err != nil {
+				t.Fatal(err)
 			}
 		}
 	})
 	if fills != 2 {
-		t.Errorf("expected 2 cache fill; got %d", fills)
+		t.Errorf("expected 2 cache fill, got %d", fills)
 	}
 }
 
+// not stable
 func TestCacheEviction(t *testing.T) {
 	once.Do(testSetup)
 	testKey := "TestCacheEviction-key"
 	getTestKey := func() {
 		for i := 0; i < 10; i++ {
+			if i == 1 {
+				time.Sleep(100 * time.Millisecond)
+			}
 			if _, err := stringGroup.Get(dummyCtx, testKey); err != nil {
 				t.Fatal(err)
 			}
@@ -123,12 +138,12 @@ func TestCacheEviction(t *testing.T) {
 	}
 
 	g := stringGroup.(*Group)
-	evict0 := g.mainCache.nevict
+	evict0 := g.mainCache.Stats().Evictions
 
 	// Trash the cache with other keys.
 	var bytesFlooded int64
 	// cacheSize/len(testKey) is approximate
-	for bytesFlooded < cacheSize+1024 {
+	for bytesFlooded < cacheSize*2 {
 		key := fmt.Sprintf("dummy-key-%d", bytesFlooded)
 		v, err := stringGroup.Get(dummyCtx, key)
 		if err != nil {
@@ -136,11 +151,13 @@ func TestCacheEviction(t *testing.T) {
 		}
 		bytesFlooded += int64(len(key) + int(v.Len()))
 	}
-	evicts := g.mainCache.nevict - evict0
+	time.Sleep(10 * time.Millisecond)
+	evicts := g.mainCache.Stats().Evictions - evict0
 	if evicts <= 0 {
 		t.Errorf("evicts = %v; want more than 0", evicts)
 	}
 
+	time.Sleep(10 * time.Millisecond)
 	// Test that the key is gone.
 	fills = countFills(getTestKey)
 	if fills != 1 {
@@ -160,7 +177,7 @@ func (p *fakePeer) Get(_ context.Context, in *GetRequest) (*view.ReaderView, err
 	}
 	buf := bytes.NewBuffer([]byte("got:" + in.Key))
 	rc := ioutil.NopCloser(buf)
-	rView := view.NewReaderView(rc, int64(buf.Len()), time.Time{})
+	rView := view.NewReaderView(rc, int64(buf.Len()), 0)
 	return rView, nil
 }
 
@@ -203,9 +220,13 @@ func TestPeers(t *testing.T) {
 		localHits++
 		buf := bytes.NewBuffer([]byte("got:" + key))
 		rc := ioutil.NopCloser(buf)
-		return view.NewReaderView(rc, int64(buf.Len()), time.Time{}), nil
+		return view.NewReaderView(rc, int64(buf.Len()), 0), nil
 	}
-	testGroup := newGroup("TestPeers-group", cacheSize, GetterFunc(getter), peerList, 1024*1024)
+
+	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil)
+	if err != nil {
+		panic(err)
+	}
 	run := func(name string, n int, wantSummary string) {
 		// Reset counters
 		localHits = 0
@@ -247,9 +268,17 @@ func TestPeers(t *testing.T) {
 	}
 	resetCacheSize := func(maxBytes int64) {
 		g := testGroup
-		g.cacheBytes = maxBytes
-		g.mainCache = cache{maxSize: 1024 * 1024}
-		g.hotCache = cache{maxSize: 1024 * 1024}
+		mCache, err := cache.NewMemory(1024*1024, cache.Options{})
+		if err != nil {
+			panic(err)
+		}
+		g.mainCache = mCache
+
+		hCache, err := cache.NewMemory(1024*1024, cache.Options{})
+		if err != nil {
+			panic(err)
+		}
+		g.hotCache = hCache
 	}
 
 	// Base case; peers all up, with no problems.
@@ -269,6 +298,7 @@ func TestPeers(t *testing.T) {
 	peerList[0] = nil
 	run("one_peer_down", 200, "localHits = 100, peers = 0 49 51")
 
+	resetCacheSize(0)
 	// Failing peer
 	peerList[0] = peer0
 	peer0.fail = true
@@ -312,7 +342,7 @@ type slowPeer struct {
 func (p *slowPeer) Get(_ context.Context, in *GetRequest) (*view.ReaderView, error) {
 	time.Sleep(time.Second)
 	data := []byte("got:" + in.Key)
-	return view.NewReaderView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), time.Time{}), nil
+	return view.NewReaderView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), 0), nil
 }
 
 func TestContextDeadlineOnPeer(t *testing.T) {
@@ -323,14 +353,22 @@ func TestContextDeadlineOnPeer(t *testing.T) {
 	peerList := fakePeers([]ProtoGetter{peer0, peer1, peer2, nil})
 	getter := func(_ context.Context, key string) (view.View, error) {
 		data := []byte("got:" + key)
-		return view.NewReaderView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), time.Time{}), nil
+		return view.NewReaderView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), 0), nil
 	}
-	testGroup := newGroup("TestContextDeadlineOnPeer-group", cacheSize, GetterFunc(getter), peerList, 1024*1024)
+
+	cache, err := cache.NewMemory(1024*1024, cache.Options{})
+	if err != nil {
+		panic(err)
+	}
+	testGroup, err := newGroup("TestContextDeadlineOnPeer-group", GetterFunc(getter), peerList, cache, cache)
+	if err != nil {
+		panic(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*300)
 	defer cancel()
 
-	_, err := testGroup.Get(ctx, "test-key")
+	_, err = testGroup.Get(ctx, "test-key")
 	if err != nil {
 		if err != context.DeadlineExceeded {
 			t.Errorf("expected Get to return context deadline exceeded")

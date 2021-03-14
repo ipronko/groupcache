@@ -1,7 +1,6 @@
 package popular
 
 import (
-	"context"
 	"sync"
 	"time"
 )
@@ -10,15 +9,14 @@ const (
 	maxBuckets = 10
 )
 
-func New(ctx context.Context, onDelete OnDelete, popularFrom int64, ttl time.Duration) *HitStore {
+func New(popularFrom int, ttl time.Duration) *HitStore {
 	h := &HitStore{
 		rotateDuration: ttl / maxBuckets,
 		popularityHits: popularFrom,
-		onDelete:       onDelete,
 		buckets:        []*bucket{newBucket()},
 	}
 
-	go h.gc(ctx)
+	go h.gc()
 
 	return h
 }
@@ -27,8 +25,7 @@ type OnDelete func(key string)
 
 type HitStore struct {
 	rotateDuration time.Duration
-	popularityHits int64
-	onDelete       OnDelete
+	popularityHits int
 
 	m       sync.RWMutex
 	buckets []*bucket
@@ -40,14 +37,9 @@ func (h *HitStore) addNew() {
 	h.m.Unlock()
 }
 
-func (h *HitStore) gc(ctx context.Context) {
+func (h *HitStore) gc() {
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(h.rotateDuration):
-		}
-
+		<-time.After(h.rotateDuration)
 		h.deleteOld()
 		h.addNew()
 	}
@@ -71,8 +63,6 @@ func (h *HitStore) finishBucket(b *bucket) {
 		if h.has(k) {
 			continue
 		}
-
-		h.onDelete(k)
 	}
 	return
 }
@@ -105,7 +95,7 @@ func (h *HitStore) IsPopular(key string) bool {
 	h.m.RLock()
 	for i := range h.buckets {
 		hits += h.buckets[i].getHits(key)
-		if hits >= h.popularityHits {
+		if hits >= int64(h.popularityHits) {
 			popular = true
 			break
 		}

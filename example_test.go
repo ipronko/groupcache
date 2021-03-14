@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ipronko/groupcache"
+	"github.com/ipronko/groupcache/cache"
 	"github.com/ipronko/groupcache/view"
 )
 
@@ -44,13 +45,13 @@ func Test_ExampleUsage(t *testing.T) {
 	hash := getHash(file)
 	check(file.Close())
 	size := fileInfo().Size()
-	expTime := time.Now().Add(time.Minute)
+	expTime := time.Minute
 	getCalls := int64(10)
 	cacheHits := int64(9)
 	key := "12345"
 
 	// Create a new group cache with a max cache size of 3MB
-	group := groupcache.NewGroup("users", 3000000, 1024*1024, groupcache.GetterFunc(
+	group, err := groupcache.NewMemory("users", 3000000, groupcache.GetterFunc(
 		func(ctx context.Context, id string) (view.View, error) {
 			if id != key {
 				t.Errorf("expected key %s, got %s", key, id)
@@ -58,12 +59,19 @@ func Test_ExampleUsage(t *testing.T) {
 			f := openFile()
 			return view.NewReaderView(f, size, expTime), nil
 		},
-	))
+	), cache.Options{})
+	if err != nil {
+		t.Errorf("create new group")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	for i := int64(0); i < getCalls; i++ {
+		// Need some time to set cache after first call
+		if i == 1 {
+			time.Sleep(time.Millisecond * 10)
+		}
 		v, err := group.Get(ctx, key)
 		if err != nil {
 			log.Fatal(err)

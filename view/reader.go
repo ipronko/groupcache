@@ -5,18 +5,18 @@ import (
 	"time"
 )
 
-func NewReaderView(rc io.ReadCloser, size int64, exp time.Time) *ReaderView {
+func NewReaderView(rc io.ReadCloser, size int64, ttl time.Duration) *ReaderView {
 	return &ReaderView{
 		rc:   rc,
 		size: size,
-		e:    exp,
+		ttl:  ttl,
 	}
 }
 
 type ReaderView struct {
 	rc   io.ReadCloser
 	size int64
-	e    time.Time
+	ttl  time.Duration
 }
 
 func (f *ReaderView) Reader() (io.ReadCloser, error) {
@@ -24,8 +24,8 @@ func (f *ReaderView) Reader() (io.ReadCloser, error) {
 }
 
 // Returns the expire time associated with this view
-func (f *ReaderView) Expire() time.Time {
-	return f.e
+func (f *ReaderView) Expire() time.Duration {
+	return f.ttl
 }
 
 func (f *ReaderView) Len() int64 {

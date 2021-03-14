@@ -23,10 +23,10 @@ import (
 	"time"
 )
 
-func NewByteView(bytes []byte, expired time.Time) ByteView {
+func NewByteView(bytes []byte, ttl time.Duration) ByteView {
 	return ByteView{
-		b: bytes,
-		e: expired,
+		b:   bytes,
+		ttl: ttl,
 	}
 }
 
@@ -35,13 +35,13 @@ func NewByteView(bytes []byte, expired time.Time) ByteView {
 // but that detail is invisible to callers.
 type ByteView struct {
 	// If b is non-nil, b is used, else s is used.
-	b []byte
-	e time.Time
+	b   []byte
+	ttl time.Duration
 }
 
 // Returns the expire time associated with this view
-func (v ByteView) Expire() time.Time {
-	return v.e
+func (v ByteView) Expire() time.Duration {
+	return v.ttl
 }
 
 // Len returns the view's length.

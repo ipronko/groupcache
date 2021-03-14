@@ -204,7 +204,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set(sizeHeader, fmt.Sprintf("%d", v.Len()))
-	w.Header().Set(expireHeader, fmt.Sprintf("%d", v.Expire().Unix()))
+	w.Header().Set(expireHeader, fmt.Sprintf("%d", v.Expire()))
 
 	rc, err := v.Reader()
 	if err != nil {
@@ -263,7 +263,7 @@ func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.ReaderView,
 	if err := h.makeRequest(ctx, http.MethodGet, in, &res); err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("server returned: %v", res.Status)
 	}
@@ -274,14 +274,13 @@ func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.ReaderView,
 		return nil, err
 	}
 
-	timeStr := res.Header.Get(expireHeader)
-	timeInt, err := strconv.ParseInt(timeStr, 10, 64)
+	durStr := res.Header.Get(expireHeader)
+	duration, err := strconv.ParseInt(durStr, 10, 64)
 	if err != nil {
 		return nil, err
 	}
-	expTime := time.Unix(timeInt, 0)
 
-	return view.NewReaderView(res.Body, size, expTime), nil
+	return view.NewReaderView(res.Body, size, time.Duration(duration)), nil
 }
 
 func (h *httpGetter) Remove(ctx context.Context, in *GetRequest) error {
