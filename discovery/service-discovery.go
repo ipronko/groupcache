@@ -48,6 +48,7 @@ func New(consulAddr, serviceName, serviceID string, opts ...Option) (*ServiceDis
 		serviceName: serviceName,
 		serviceID:   serviceID,
 		failTTL:     10 * time.Second,
+		logger:      nopLogger{},
 	}
 	for _, opt := range opts {
 		opt(sd)
