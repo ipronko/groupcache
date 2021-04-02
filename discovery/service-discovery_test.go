@@ -37,13 +37,13 @@ func runSD(ctx context.Context, id, addr string) {
 	err = discovery.Register(serviceAddr, serviceAddr)
 	check(err)
 
-	discovery.Watch(ctx, func(action Action, addr string) error {
-		return watch(id, action, addr)
+	discovery.Watch(ctx, func(addr ...string) error {
+		return watch(id, addr...)
 	})
 }
 
-func watch(id string, action Action, addr string) error {
-	fmt.Printf("ID: %s, New event: %s, Addr: %s\n", id, action, addr)
+func watch(id string, addr ...string) error {
+	fmt.Printf("ID: %s, AddrPool: %v\n", id, addr)
 	return nil
 }
 
