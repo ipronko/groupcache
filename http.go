@@ -42,6 +42,11 @@ const (
 	expireHeader = "X-Expire"
 )
 
+type ServiceDiscovery interface {
+	Register(serviceAddr, httpHealthAddr string) error
+	Watch(ctx context.Context, watchFunc func(addr ...string)) error
+}
+
 // HTTPPool implements PeerPicker for a pool of HTTP peers.
 type HTTPPool struct {
 	// this peer's base URL, e.g. "https://example.net:8000"
@@ -78,16 +83,21 @@ type HTTPPoolOptions struct {
 	// receives a request.
 	// If nil, uses the http.Request.Context()
 	Context func(*http.Request) context.Context
+
+	ServiceDiscovery ServiceDiscovery
 }
 
 // NewHTTPPool initializes an HTTP pool of peers, and registers itself as a PeerPicker.
 // For convenience, it also registers itself as an http.Handler with http.DefaultServeMux.
 // The self argument should be a valid base URL that points to the current server,
 // for example "http://example.net:8000".
-func NewHTTPPool(self string) *HTTPPool {
-	p := NewHTTPPoolOpts(self, nil)
+func NewHTTPPool(ctx context.Context, self string) (*HTTPPool, error) {
+	p, err := NewHTTPPoolOpts(ctx, self, nil)
+	if err != nil {
+		return nil, err
+	}
 	http.Handle(p.opts.BasePath, p)
-	return p
+	return p, nil
 }
 
 var httpPoolMade bool
@@ -95,9 +105,9 @@ var httpPoolMade bool
 // NewHTTPPoolOpts initializes an HTTP pool of peers with the given options.
 // Unlike NewHTTPPool, this function does not register the created pool as an HTTP handler.
 // The returned *HTTPPool implements http.Handler and must be registered using http.Handle.
-func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
+func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTTPPool, error) {
 	if httpPoolMade {
-		panic("groupcache: NewHTTPPool must be called only once")
+		return nil, fmt.Errorf("groupcache: NewHTTPPool must be called only once")
 	}
 	httpPoolMade = true
 
@@ -116,8 +126,21 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 	}
 	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)
 
-	RegisterPeerPicker(func() PeerPicker { return p })
-	return p
+	err := RegisterPeerPicker(func() PeerPicker { return p })
+	if err != nil {
+		return nil, err
+	}
+
+	if p.opts.ServiceDiscovery != nil {
+		err := p.opts.ServiceDiscovery.Register(self, "") //TODO create http health endpoint
+		if err != nil {
+			return nil, err
+		}
+		go func() {
+			p.opts.ServiceDiscovery.Watch(ctx, p.Set)
+		}()
+	}
+	return p, nil
 }
 
 // Set updates the pool's list of peers.

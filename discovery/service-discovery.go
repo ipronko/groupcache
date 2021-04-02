@@ -22,8 +22,6 @@ type nopLogger struct{}
 
 func (l nopLogger) Errorf(_ string, _ ...interface{}) {}
 
-type WatchFunc func(addr ...string) error
-
 type Option func(sd *ServiceDiscovery)
 
 func WithLogger(l Logger) Option {
@@ -79,7 +77,7 @@ func (s *ServiceDiscovery) Register(serviceAddr, httpHealthAddr string) error {
 	return s.agent.ServiceRegister(reg)
 }
 
-func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc WatchFunc) error {
+func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc func(addr ...string)) error {
 	t := time.NewTicker(time.Second)
 	prevState := make([]string, 0)
 	for {
@@ -111,9 +109,6 @@ func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc WatchFunc) error
 		}
 
 		prevState = currState
-		err = watchFunc(currState...)
-		if err != nil {
-			s.logger.Errorf("notify err: %s", err.Error())
-		}
+		watchFunc(currState...)
 	}
 }

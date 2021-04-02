@@ -20,6 +20,7 @@ package groupcache
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ipronko/groupcache/view"
 )
@@ -57,11 +58,12 @@ var (
 // It is called once, when the first group is created.
 // Either RegisterPeerPicker or RegisterPerGroupPeerPicker should be
 // called exactly once, but not both.
-func RegisterPeerPicker(fn func() PeerPicker) {
+func RegisterPeerPicker(fn func() PeerPicker) error {
 	if portPicker != nil {
-		panic("RegisterPeerPicker called more than once")
+		return fmt.Errorf("RegisterPeerPicker called more than once")
 	}
 	portPicker = func(_ string) PeerPicker { return fn() }
+	return nil
 }
 
 // RegisterPerGroupPeerPicker registers the peer initialization function,
