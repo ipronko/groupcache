@@ -133,7 +133,7 @@ func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTT
 	}
 
 	if p.opts.ServiceDiscovery != nil {
-		err := p.opts.ServiceDiscovery.Register(self, filepath.Join(self, p.opts.BasePath, "health"))
+		err := p.opts.ServiceDiscovery.Register(self, fmt.Sprintf("%s/%s", self, filepath.Join(p.opts.BasePath, "health")))
 		if err != nil {
 			return nil, err
 		}
@@ -192,14 +192,13 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(r.URL.Path[len(p.opts.BasePath):], "/", 3)
-	if len(parts) != 2 {
+	if len(parts) > 2 || len(parts) < 1 {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
 	if parts[len(parts)-1] == "health" {
-		//TODO del
-		logger.Infof("health check")
+		w.Write([]byte("ok"))
 		return
 	}
 

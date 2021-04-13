@@ -12,7 +12,8 @@ import (
 
 var serviceName = "groupcache"
 
-func Test_SD(t *testing.T) {
+// Test with local consul
+func _Test_SD(t *testing.T) {
 	go runSD(context.Background(), "1", ":8081")
 	go runSD(context.Background(), "2", ":8082")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -29,7 +30,7 @@ func (l *logger) Errorf(msg string, args ...interface{}) {
 }
 
 func runSD(ctx context.Context, id, addr string) {
-	discovery, err := New("127.0.0.1:8500", serviceName, id, WithLogger(new(logger)))
+	discovery, err := New("127.0.0.1:8500", serviceName, id, WithLogger(new(logger)), WithTTL(time.Second))
 	check(err)
 
 	runServer(ctx, addr)

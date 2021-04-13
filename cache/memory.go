@@ -68,7 +68,7 @@ type StoreType int
 type cache struct {
 	bufPool         *bpool.BytePool
 	maxInstanceSize int64
-	lilFile         int64 //TODO set
+	lilFile         int64
 	logger          Logger
 	cache           *ristretto.Cache
 }

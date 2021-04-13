@@ -148,11 +148,13 @@ func TestCacheEviction(t *testing.T) {
 	getTestKey := func() {
 		for i := 0; i < 10; i++ {
 			if i == 1 {
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(time.Second)
 			}
-			if _, err := memoryGroup.Get(dummyCtx, testKey); err != nil {
+			v, err := memoryGroup.Get(dummyCtx, testKey)
+			if err != nil {
 				t.Fatal(err)
 			}
+			io.Copy(ioutil.Discard, v)
 		}
 	}
 	fills := countFills(getTestKey)
