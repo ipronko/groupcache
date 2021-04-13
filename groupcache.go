@@ -60,13 +60,13 @@ type Getter interface {
 	// uniquely describe the loaded data, without an implicit
 	// current time, and without relying on cache expiration
 	// mechanisms.
-	Get(ctx context.Context, key string) (view.View, error)
+	Get(ctx context.Context, key string) (*view.View, error)
 }
 
 // A GetterFunc implements Getter with a function.
-type GetterFunc func(ctx context.Context, key string) (view.View, error)
+type GetterFunc func(ctx context.Context, key string) (*view.View, error)
 
-func (f GetterFunc) Get(ctx context.Context, key string) (view.View, error) {
+func (f GetterFunc) Get(ctx context.Context, key string) (*view.View, error) {
 	return f(ctx, key)
 }
 
@@ -276,7 +276,7 @@ func (g *Group) initPeers() {
 	}
 }
 
-func (g *Group) Get(ctx context.Context, key string) (view.View, error) {
+func (g *Group) Get(ctx context.Context, key string) (*view.View, error) {
 	g.peersOnce.Do(g.initPeers)
 	g.Stats.Gets.Add(1)
 	v, cacheHit := g.lookupCache(key)
@@ -343,11 +343,11 @@ func (g *Group) Remove(ctx context.Context, key string) error {
 }
 
 // load loads key either by invoking the getter locally or by sending it to another machine.
-func (g *Group) load(ctx context.Context, key string) (view.View, error) {
+func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 	g.Stats.Loads.Add(1)
 
 	g.Stats.LoadsDeduped.Add(1)
-	var value view.View
+	var value *view.View
 	var err error
 	if peer, ok := g.peers.PickPeer(key); ok {
 
@@ -394,18 +394,18 @@ func (g *Group) load(ctx context.Context, key string) (view.View, error) {
 	return value, nil
 }
 
-func (g *Group) getLocally(ctx context.Context, key string) (view.View, error) {
+func (g *Group) getLocally(ctx context.Context, key string) (*view.View, error) {
 	v, err := g.getter.Get(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 
-	g.mainCache.Add(key, v)
-	return v, nil
+	err = g.mainCache.Add(key, v)
+	return v, err
 
 }
 
-func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string) (view.View, error) {
+func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string) (*view.View, error) {
 	req := &GetRequest{
 		Group: g.name,
 		Key:   key,
@@ -416,8 +416,8 @@ func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string) (
 		return v, err
 	}
 
-	g.hotCache.Add(key, v)
-	return v, nil
+	err = g.hotCache.Add(key, v)
+	return v, err
 }
 
 func (g *Group) removeFromPeer(ctx context.Context, peer ProtoGetter, key string) error {
@@ -428,7 +428,7 @@ func (g *Group) removeFromPeer(ctx context.Context, peer ProtoGetter, key string
 	return peer.Remove(ctx, req)
 }
 
-func (g *Group) lookupCache(key string) (view view.View, ok bool) {
+func (g *Group) lookupCache(key string) (view *view.View, ok bool) {
 	view, ok = g.mainCache.Get(key)
 	if ok {
 		return view, ok

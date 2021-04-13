@@ -2,7 +2,9 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"time"
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/oxtoacart/bpool"
@@ -23,6 +25,7 @@ func NewMemory(maxSize int64, opts Options) (*cache, error) {
 		cache:           rCache,
 		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
 		logger:          opts.Logger,
+		lilFile:         opts.LittleFile,
 	}
 
 	return c, nil
@@ -35,6 +38,7 @@ type Options struct {
 	Logger              Logger
 	CopyBufferSize      int
 	CopyBufferWidth     int
+	LittleFile          int64
 }
 
 func (o *Options) Complete(maxSize int64) {
@@ -53,6 +57,9 @@ func (o *Options) Complete(maxSize int64) {
 	if o.CopyBufferWidth == 0 {
 		o.CopyBufferWidth = int(defaultBuffer)
 	}
+	if o.LittleFile == 0 {
+		o.LittleFile = int64(defaultLittleFile)
+	}
 }
 
 type StoreType int
@@ -61,6 +68,7 @@ type StoreType int
 type cache struct {
 	bufPool         *bpool.BytePool
 	maxInstanceSize int64
+	lilFile         int64 //TODO set
 	logger          Logger
 	cache           *ristretto.Cache
 }
@@ -75,64 +83,94 @@ func (c *cache) Stats() CacheStats {
 	}
 }
 
-func (c *cache) Add(key string, value view.View) {
+func (c *cache) Add(key string, value *view.View) error {
 	if value.Len() > c.maxInstanceSize {
-		return
+		return nil
 	}
 
-	if value.Type() == view.ByteType {
-		c.cache.SetWithTTL(key, value, value.Len(), value.Expire())
-		return
+	if buf, ok := value.BytesBuffer(); ok {
+		c.cache.SetWithTTL(key, byteValue{
+			ttl:  value.Expire(),
+			data: buf.Bytes(),
+		}, int64(buf.Len()), value.Expire())
+		return nil
 	}
 
-	c.readAndSet(key, value.(*view.ReaderView))
-	return
+	return c.set(key, value)
 }
 
-func (c *cache) readAndSet(key string, value *view.ReaderView) {
+func (c *cache) set(key string, value *view.View) error {
+	if value.Len() <= c.lilFile {
+		buff, err := c.readAndSet(key, value, value.Len(), value.Expire())
+		if err != nil {
+			return err
+		}
+		value.SwapReader(buff)
+		return nil
+	}
+
 	pipeR, pipeW := io.Pipe()
-	reader, _ := value.Reader()
+	oldReader := value.SwapReader(pipeR)
+	teeReader := io.TeeReader(oldReader, pipeW)
 
-	teeReader := io.TeeReader(reader, pipeW)
 	go func() {
-		defer pipeW.Close()
+		defer func() {
+			pipeW.Close()
+			if rc, ok := oldReader.(io.ReadCloser); ok {
+				rc.Close()
+			}
+		}()
 
-		bullPool := c.bufPool.Get()
-		defer c.bufPool.Put(bullPool)
-
-		buff := bytes.NewBuffer(nil)
-		wrote, err := io.CopyBuffer(buff, teeReader, bullPool)
-		if err != nil && c.logger != nil {
-			c.logger.Errorf("copy from reader to bytes buffer err: %s", err.Error())
+		_, err := c.readAndSet(key, teeReader, value.Len(), value.Expire())
+		if err != nil {
+			c.logger.Errorf("read and set err: %s", err.Error())
 			return
 		}
-
-		err = reader.Close()
-		if err != nil && c.logger != nil {
-			c.logger.Errorf("close reader err: %s", err.Error())
-			return
-		}
-
-		if wrote != value.Len() {
-			c.logger.Errorf("wrote %d, value size %d", wrote, value.Len())
-			return
-		}
-
-		byteView := view.NewByteView(buff.Bytes(), value.Expire())
-		c.cache.SetWithTTL(key, byteView, wrote, value.Expire())
 	}()
-
-	value.SwapReader(pipeR)
+	return nil
 }
 
-func (c *cache) Get(key string) (v view.View, ok bool) {
+func (c *cache) readAndSet(key string, rc io.Reader, len int64, expire time.Duration) (*bytes.Buffer, error) {
+	bullPool := c.bufPool.Get()
+	defer c.bufPool.Put(bullPool)
+
+	buff := bytes.NewBuffer(nil)
+	wrote, err := io.CopyBuffer(buff, rc, bullPool)
+	if err != nil && c.logger != nil {
+		return nil, fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
+	}
+
+	if wrote != len {
+		return nil, fmt.Errorf("wrote %d, value size %d", wrote, len)
+	}
+
+	data := buff.Bytes()
+	c.cache.SetWithTTL(key, byteValue{
+		ttl:  expire,
+		data: data,
+	}, wrote, expire)
+
+	return buff, nil
+}
+
+type byteValue struct {
+	ttl  time.Duration
+	data []byte
+}
+
+func (c *cache) Get(key string) (*view.View, bool) {
 	vi, ok := c.cache.Get(key)
 	if !ok {
-		return
+		return nil, false
 	}
 
-	v, ok = vi.(view.View)
-	return
+	val, ok := vi.(byteValue)
+	if !ok {
+		c.Remove(key)
+		return nil, false
+	}
+
+	return view.NewView(bytes.NewBuffer(val.data), int64(len(val.data)), val.ttl), true
 }
 
 func (c *cache) Remove(key string) {

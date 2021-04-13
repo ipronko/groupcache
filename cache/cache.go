@@ -8,8 +8,8 @@ import (
 )
 
 type ViewCache interface {
-	Add(key string, value view.View)
-	Get(key string) (v view.View, ok bool)
+	Add(key string, value *view.View) error
+	Get(key string) (v *view.View, ok bool)
 	Remove(key string)
 	Stats() CacheStats
 }
@@ -33,6 +33,8 @@ const (
 
 	defaultBuffer          = 32 * units.KiB
 	defaultBufferInstances = 256
+
+	defaultLittleFile = 100 * units.KiB
 )
 
 type nopLogger struct{}

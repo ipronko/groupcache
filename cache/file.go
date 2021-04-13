@@ -112,26 +112,32 @@ func (c *fileCache) restoreFiles() {
 	}
 }
 
-func (c *fileCache) Add(key string, value view.View) {
+func (c *fileCache) Add(key string, value *view.View) error {
 	if value.Len() > c.maxInstanceSize {
-		return
+		return nil
 	}
 
 	if !c.popularFiles.IsPopular(key) {
-		return
+		return nil
 	}
 
-	c.readAndSet(key, value.(*view.ReaderView))
-	return
+	return c.set(key, value)
 }
 
-func (c *fileCache) readAndSet(key string, value *view.ReaderView) {
+func (c *fileCache) set(key string, value *view.View) error {
+	//What if value is buffer?
 	pipeR, pipeW := io.Pipe()
-	reader, _ := value.Reader()
 
-	teeReader := io.TeeReader(reader, pipeW)
+	oldReader := value.SwapReader(pipeR)
+
+	teeReader := io.TeeReader(oldReader, pipeW)
 	go func() {
-		defer pipeW.Close()
+		defer func() {
+			pipeW.Close()
+			if rc, ok := oldReader.(io.ReadCloser); ok {
+				rc.Close()
+			}
+		}()
 
 		bullPool := c.bufPool.Get()
 		defer c.bufPool.Put(bullPool)
@@ -152,12 +158,6 @@ func (c *fileCache) readAndSet(key string, value *view.ReaderView) {
 			return
 		}
 
-		err = reader.Close()
-		if err != nil && c.logger != nil {
-			c.logger.Errorf("close reader err: %s", err.Error())
-			return
-		}
-
 		if wrote != value.Len() {
 			c.logger.Errorf("wrote %d, value size %d", wrote, value.Len())
 			return
@@ -174,10 +174,10 @@ func (c *fileCache) readAndSet(key string, value *view.ReaderView) {
 		c.cache.SetWithTTL(key, file, wrote, value.Expire())
 	}()
 
-	value.SwapReader(pipeR)
+	return nil
 }
 
-func (c *fileCache) Get(key string) (v view.View, ok bool) {
+func (c *fileCache) Get(key string) (v *view.View, ok bool) {
 	vi, ok := c.cache.Get(key)
 	if !ok {
 		return
@@ -293,12 +293,12 @@ type file struct {
 	ttl      time.Duration
 }
 
-func (f file) readerView() (*view.ReaderView, error) {
+func (f file) readerView() (*view.View, error) {
 	open, err := os.Open(f.filePath)
 	if err != nil {
 		return nil, fmt.Errorf("open %s file err: %w", f.filePath, err)
 	}
-	return view.NewReaderView(open, f.size, f.ttl), nil
+	return view.NewView(open, f.size, f.ttl), nil
 }
 
 func (f file) delete() error {
@@ -308,18 +308,6 @@ func (f file) delete() error {
 	return nil
 }
 
-//func (f file) createTmpFile() (*os.File, error) {
-//	err := os.MkdirAll(filepath.Dir(f.filePath), 0700)
-//	if err != nil {
-//		return nil, fmt.Errorf("creating dirs for filePath %s err: %w", f.filePath, err)
-//	}
-//	file, err := os.Create(f.filePath)
-//	if err != nil {
-//		return nil, fmt.Errorf("create file %s err: %w", f.filePath, err)
-//	}
-//	return file, nil
-//}
-//
 func getFilePath(key string) string {
 	hash := sha1.New()
 	hash.Write([]byte(key))

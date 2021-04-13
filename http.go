@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -132,12 +133,15 @@ func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTT
 	}
 
 	if p.opts.ServiceDiscovery != nil {
-		err := p.opts.ServiceDiscovery.Register(self, "") //TODO create http health endpoint
+		err := p.opts.ServiceDiscovery.Register(self, filepath.Join(self, p.opts.BasePath, "health"))
 		if err != nil {
 			return nil, err
 		}
 		go func() {
-			p.opts.ServiceDiscovery.Watch(ctx, p.Set)
+			err := p.opts.ServiceDiscovery.Watch(ctx, p.Set)
+			if err != nil {
+				logger.Errorf("watch to service updates err: %s", err.Error())
+			}
 		}()
 	}
 	return p, nil
@@ -187,15 +191,18 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 }
 
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Parse request.
-	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) {
-		panic("HTTPPool serving unexpected path: " + r.URL.Path)
-	}
-	parts := strings.SplitN(r.URL.Path[len(p.opts.BasePath):], "/", 2)
+	parts := strings.SplitN(r.URL.Path[len(p.opts.BasePath):], "/", 3)
 	if len(parts) != 2 {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	if parts[len(parts)-1] == "health" {
+		//TODO del
+		logger.Infof("health check")
+		return
+	}
+
 	groupName := parts[0]
 	key := parts[1]
 
@@ -225,18 +232,12 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer v.Close()
 
 	w.Header().Set(sizeHeader, fmt.Sprintf("%d", v.Len()))
 	w.Header().Set(expireHeader, fmt.Sprintf("%d", v.Expire()))
 
-	rc, err := v.Reader()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rc.Close()
-
-	io.Copy(w, rc)
+	io.Copy(w, v)
 }
 
 type httpGetter struct {
@@ -281,7 +282,7 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequ
 	return nil
 }
 
-func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.ReaderView, error) {
+func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.View, error) {
 	var res http.Response
 	if err := h.makeRequest(ctx, http.MethodGet, in, &res); err != nil {
 		return nil, err
@@ -303,7 +304,7 @@ func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.ReaderView,
 		return nil, err
 	}
 
-	return view.NewReaderView(res.Body, size, time.Duration(duration)), nil
+	return view.NewView(res.Body, size, time.Duration(duration)), nil
 }
 
 func (h *httpGetter) Remove(ctx context.Context, in *GetRequest) error {

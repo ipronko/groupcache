@@ -79,7 +79,7 @@ func (s *ServiceDiscovery) Register(serviceAddr, httpHealthAddr string) error {
 
 func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc func(addr ...string)) error {
 	t := time.NewTicker(time.Second)
-	prevState := make([]string, 0)
+	previousState := make([]string, 0)
 	for {
 		select {
 		case <-ctx.Done():
@@ -93,22 +93,22 @@ func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc func(addr ...str
 			continue
 		}
 
-		currState := make([]string, 0, len(services))
+		currentState := make([]string, 0, len(services))
 		for _, service := range services {
 			if service.AggregatedStatus != consulStatusPass {
 				continue
 			}
 
-			currState = append(currState, service.Service.Address)
+			currentState = append(currentState, service.Service.Address)
 		}
 
-		sort.Strings(currState)
+		sort.Strings(currentState)
 
-		if reflect.DeepEqual(prevState, currState) {
+		if reflect.DeepEqual(previousState, currentState) {
 			continue
 		}
 
-		prevState = currState
-		watchFunc(currState...)
+		previousState = currentState
+		watchFunc(currentState...)
 	}
 }

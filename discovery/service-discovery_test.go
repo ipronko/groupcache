@@ -37,8 +37,8 @@ func runSD(ctx context.Context, id, addr string) {
 	err = discovery.Register(serviceAddr, serviceAddr)
 	check(err)
 
-	discovery.Watch(ctx, func(addr ...string) error {
-		return watch(id, addr...)
+	discovery.Watch(ctx, func(addr ...string) {
+		watch(id, addr...)
 	})
 }
 

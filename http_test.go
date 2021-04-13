@@ -13,30 +13,9 @@
 //See the License for the specific language governing permissions and
 //limitations under the License.
 //*/
-//
-////TODO
-//
 package groupcache
 
-//
-//import (
-//	"context"
-//	"errors"
-//	"flag"
-//	"fmt"
-//	"log"
-//	"net"
-//	"net/http"
-//	"net/http/httptest"
-//	"os"
-//	"os/exec"
-//	"strconv"
-//	"strings"
-//	"sync"
-//	"testing"
-//	"time"
-//)
-//
+//TODO
 //var (
 //	peerAddrs  = flag.String("test_peer_addrs", "", "Comma-separated list of peer addresses; used by TestHTTPPool")
 //	peerIndex  = flag.Int("test_peer_index", -1, "Index of which peer this child is; used by TestHTTPPool")
@@ -93,31 +72,46 @@ package groupcache
 //	}()
 //	wg.Wait()
 //
-//	// Use a dummy self address so that we don't handle gets in-process.
-//	p := NewHTTPPool("should-be-ignored")
+//	p, err := NewHTTPPool(context.Background(), "ignored")
+//	if err != nil {
+//		panic(err)
+//	}
+//	//p := NewHTTPPoolctx, "should-be-ignored")
 //	p.Set(addrToURL(childAddr)...)
 //
 //	// Dummy getter function. Gets should go to children only.
 //	// The only time this process will handle a get is when the
 //	// children can't be contacted for some reason.
-//	getter := GetterFunc(func(ctx context.Context, key string, dest Sink) error {
-//		return errors.New("parent getter called; something's wrong")
+//	getter := GetterFunc(func(ctx context.Context, key string) (*view.View, error) {
+//		return nil, errors.New("parent getter called; something's wrong")
 //	})
 //
 //	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 //	defer cancel()
 //
-//	g := NewGroup("httpPoolTest", 1<<20, getter)
-//
+//	g, err := NewMemory("httpPoolTest", 1<<20, getter, cache.Options{
+//		MaxInstanceSize: 1 << 20,
+//		Logger:          logrus.New(),
+//	})
+//	if err != nil {
+//		panic(err)
+//	}
 //	for _, key := range testKeys(nGets) {
-//		var value string
-//		if err := g.Get(ctx, key, StringSink(&value)); err != nil {
+//		val, err := g.Get(ctx, key)
+//		if err != nil {
 //			t.Fatal(err)
 //		}
-//		if suffix := ":" + key; !strings.HasSuffix(value, suffix) {
-//			t.Errorf("Get(%q) = %q, want value ending in %q", key, value, suffix)
+//
+//		data, err := ioutil.ReadAll(val)
+//		if err != nil {
+//			panic(err)
 //		}
-//		t.Logf("Get key=%q, value=%q (peer:key)", key, value)
+//		val.Close()
+//
+//		if suffix := ":" + key; !strings.HasSuffix(string(data), suffix) {
+//			t.Errorf("Get(%q) = %q, want value ending in %q", key, string(data), suffix)
+//		}
+//		t.Logf("Get key=%q, value=%q (peer:key)", key, string(data))
 //	}
 //
 //	if serverHits != nGets {
@@ -125,12 +119,11 @@ package groupcache
 //	}
 //	serverHits = 0
 //
-//	var value string
 //	var key = "removeTestKey"
 //
 //	// Multiple gets on the same key
 //	for i := 0; i < 2; i++ {
-//		if err := g.Get(ctx, key, StringSink(&value)); err != nil {
+//		if _, err := g.Get(ctx, key); err != nil {
 //			t.Fatal(err)
 //		}
 //	}
@@ -146,7 +139,7 @@ package groupcache
 //	}
 //
 //	// Get the key again
-//	if err := g.Get(ctx, key, StringSink(&value)); err != nil {
+//	if _, err := g.Get(ctx, key); err != nil {
 //		t.Fatal(err)
 //	}
 //
@@ -154,6 +147,8 @@ package groupcache
 //	if serverHits != 2 {
 //		t.Error("expected serverHits to be '2'")
 //	}
+//
+//	time.Sleep(time.Minute)
 //}
 //
 //func testKeys(n int) (keys []string) {
@@ -167,18 +162,34 @@ package groupcache
 //func beChildForTestHTTPPool(t *testing.T) {
 //	addrs := strings.Split(*peerAddrs, ",")
 //
-//	p := NewHTTPPool("http://" + addrs[*peerIndex])
-//	p.Set(addrToURL(addrs)...)
+//	//TODO del after manual test
+//	sd, err := discovery.New("127.0.0.1:8500", "groupcache_test", addrs[*peerIndex], discovery.WithLogger(logrus.New()))
+//	if err != nil {
+//		panic(err)
+//	}
 //
-//	getter := GetterFunc(func(ctx context.Context, key string, dest Sink) error {
+//	p, err := NewHTTPPoolOpts(context.Background(), "http://"+addrs[*peerIndex], &HTTPPoolOptions{
+//		ServiceDiscovery: sd,
+//	})
+//	if err != nil {
+//		panic(err)
+//	}
+//	//TODO must be updated by consul
+//	//p.Set(addrToURL(addrs)...)
+//
+//	getter := GetterFunc(func(ctx context.Context, key string) (*view.View, error) {
 //		if _, err := http.Get(*serverAddr); err != nil {
 //			t.Logf("HTTP request from getter failed with '%s'", err)
 //		}
 //
-//		dest.SetString(strconv.Itoa(*peerIndex)+":"+key, time.Time{})
-//		return nil
+//		buffer := bytes.NewBuffer(nil)
+//		buffer.Write([]byte(strconv.Itoa(*peerIndex) + ":" + key))
+//		return view.NewView(ioutil.NopCloser(buffer), int64(buffer.Len()), 0), nil
 //	})
-//	NewGroup("httpPoolTest", 1<<20, getter)
+//	_, err = NewMemory("httpPoolTest", 1<<20, getter, cache.Options{Logger: logrus.New()})
+//	if err != nil {
+//		panic(err)
+//	}
 //
 //	log.Fatal(http.ListenAndServe(addrs[*peerIndex], p))
 //}
