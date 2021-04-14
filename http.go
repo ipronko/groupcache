@@ -86,6 +86,8 @@ type HTTPPoolOptions struct {
 	Context func(*http.Request) context.Context
 
 	ServiceDiscovery ServiceDiscovery
+
+	Auth string
 }
 
 // NewHTTPPool initializes an HTTP pool of peers, and registers itself as a PeerPicker.
@@ -160,6 +162,7 @@ func (p *HTTPPool) Set(peers ...string) {
 		p.httpGetters[peer] = &httpGetter{
 			getTransport: p.opts.Transport,
 			baseURL:      peer + p.opts.BasePath,
+			auth:         p.opts.Auth,
 		}
 	}
 }
@@ -202,6 +205,14 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if p.opts.Auth != "" {
+		auth := r.Header.Get("Authorization")
+		if auth != p.opts.Auth {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+	}
+
 	groupName := parts[0]
 	key := parts[1]
 
@@ -242,6 +253,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type httpGetter struct {
 	getTransport func(context.Context) http.RoundTripper
 	baseURL      string
+	auth         string
 }
 
 // GetURL
@@ -267,6 +279,10 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequ
 
 	// Pass along the context to the RoundTripper
 	req = req.WithContext(ctx)
+
+	if h.auth != "" {
+		req.Header.Add("Authorization", h.auth)
+	}
 
 	tr := http.DefaultTransport
 	if h.getTransport != nil {

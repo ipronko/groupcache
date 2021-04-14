@@ -31,7 +31,6 @@ func (f *View) Close() error {
 	return nil
 }
 
-// Returns the expire time associated with this view
 func (f *View) Expire() time.Duration {
 	return f.ttl
 }
