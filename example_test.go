@@ -52,12 +52,12 @@ func Test_ExampleUsage(t *testing.T) {
 
 	// Create a new group cache with a max cache size of 3MB
 	group, err := groupcache.NewMemory("users", 3000000, groupcache.GetterFunc(
-		func(ctx context.Context, id string) (view.View, error) {
+		func(ctx context.Context, id string) (*view.View, error) {
 			if id != key {
 				t.Errorf("expected key %s, got %s", key, id)
 			}
 			f := openFile()
-			return view.NewReaderView(f, size, expTime), nil
+			return view.NewView(f, size, expTime), nil
 		},
 	), cache.Options{})
 	if err != nil {
@@ -77,10 +77,9 @@ func Test_ExampleUsage(t *testing.T) {
 			log.Fatal(err)
 		}
 
-		reader, err := v.Reader()
 		check(err)
-		testHash := getHash(reader)
-		reader.Close()
+		testHash := getHash(v)
+		v.Close()
 
 		if hash != testHash {
 			t.Errorf("not expected hash %s", testHash)

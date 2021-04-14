@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,11 @@ const (
 	sizeHeader   = "X-Size"
 	expireHeader = "X-Expire"
 )
+
+type ServiceDiscovery interface {
+	Register(serviceAddr, httpHealthAddr string) error
+	Watch(ctx context.Context, watchFunc func(addr ...string)) error
+}
 
 // HTTPPool implements PeerPicker for a pool of HTTP peers.
 type HTTPPool struct {
@@ -78,16 +84,21 @@ type HTTPPoolOptions struct {
 	// receives a request.
 	// If nil, uses the http.Request.Context()
 	Context func(*http.Request) context.Context
+
+	ServiceDiscovery ServiceDiscovery
 }
 
 // NewHTTPPool initializes an HTTP pool of peers, and registers itself as a PeerPicker.
 // For convenience, it also registers itself as an http.Handler with http.DefaultServeMux.
 // The self argument should be a valid base URL that points to the current server,
 // for example "http://example.net:8000".
-func NewHTTPPool(self string) *HTTPPool {
-	p := NewHTTPPoolOpts(self, nil)
+func NewHTTPPool(ctx context.Context, self string) (*HTTPPool, error) {
+	p, err := NewHTTPPoolOpts(ctx, self, nil)
+	if err != nil {
+		return nil, err
+	}
 	http.Handle(p.opts.BasePath, p)
-	return p
+	return p, nil
 }
 
 var httpPoolMade bool
@@ -95,9 +106,9 @@ var httpPoolMade bool
 // NewHTTPPoolOpts initializes an HTTP pool of peers with the given options.
 // Unlike NewHTTPPool, this function does not register the created pool as an HTTP handler.
 // The returned *HTTPPool implements http.Handler and must be registered using http.Handle.
-func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
+func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTTPPool, error) {
 	if httpPoolMade {
-		panic("groupcache: NewHTTPPool must be called only once")
+		return nil, fmt.Errorf("groupcache: NewHTTPPool must be called only once")
 	}
 	httpPoolMade = true
 
@@ -116,8 +127,24 @@ func NewHTTPPoolOpts(self string, o *HTTPPoolOptions) *HTTPPool {
 	}
 	p.peers = consistenthash.New(p.opts.Replicas, p.opts.HashFn)
 
-	RegisterPeerPicker(func() PeerPicker { return p })
-	return p
+	err := RegisterPeerPicker(func() PeerPicker { return p })
+	if err != nil {
+		return nil, err
+	}
+
+	if p.opts.ServiceDiscovery != nil {
+		err := p.opts.ServiceDiscovery.Register(self, fmt.Sprintf("%s/%s", self, filepath.Join(p.opts.BasePath, "health")))
+		if err != nil {
+			return nil, err
+		}
+		go func() {
+			err := p.opts.ServiceDiscovery.Watch(ctx, p.Set)
+			if err != nil {
+				logger.Errorf("watch to service updates err: %s", err.Error())
+			}
+		}()
+	}
+	return p, nil
 }
 
 // Set updates the pool's list of peers.
@@ -164,15 +191,17 @@ func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
 }
 
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Parse request.
-	if !strings.HasPrefix(r.URL.Path, p.opts.BasePath) {
-		panic("HTTPPool serving unexpected path: " + r.URL.Path)
-	}
-	parts := strings.SplitN(r.URL.Path[len(p.opts.BasePath):], "/", 2)
-	if len(parts) != 2 {
+	parts := strings.SplitN(r.URL.Path[len(p.opts.BasePath):], "/", 3)
+	if len(parts) > 2 || len(parts) < 1 {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	if parts[len(parts)-1] == "health" {
+		w.Write([]byte("ok"))
+		return
+	}
+
 	groupName := parts[0]
 	key := parts[1]
 
@@ -202,18 +231,12 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer v.Close()
 
 	w.Header().Set(sizeHeader, fmt.Sprintf("%d", v.Len()))
 	w.Header().Set(expireHeader, fmt.Sprintf("%d", v.Expire()))
 
-	rc, err := v.Reader()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rc.Close()
-
-	io.Copy(w, rc)
+	io.Copy(w, v)
 }
 
 type httpGetter struct {
@@ -258,7 +281,7 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequ
 	return nil
 }
 
-func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.ReaderView, error) {
+func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.View, error) {
 	var res http.Response
 	if err := h.makeRequest(ctx, http.MethodGet, in, &res); err != nil {
 		return nil, err
@@ -280,7 +303,7 @@ func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.ReaderView,
 		return nil, err
 	}
 
-	return view.NewReaderView(res.Body, size, time.Duration(duration)), nil
+	return view.NewView(res.Body, size, time.Duration(duration)), nil
 }
 
 func (h *httpGetter) Remove(ctx context.Context, in *GetRequest) error {

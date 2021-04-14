@@ -20,13 +20,14 @@ package groupcache
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ipronko/groupcache/view"
 )
 
 // ProtoGetter is the interface that must be implemented by a peer.
 type ProtoGetter interface {
-	Get(context context.Context, in *GetRequest) (*view.ReaderView, error)
+	Get(context context.Context, in *GetRequest) (*view.View, error)
 	Remove(context context.Context, in *GetRequest) error
 	// GetURL returns the peer URL
 	GetURL() string
@@ -57,11 +58,12 @@ var (
 // It is called once, when the first group is created.
 // Either RegisterPeerPicker or RegisterPerGroupPeerPicker should be
 // called exactly once, but not both.
-func RegisterPeerPicker(fn func() PeerPicker) {
+func RegisterPeerPicker(fn func() PeerPicker) error {
 	if portPicker != nil {
-		panic("RegisterPeerPicker called more than once")
+		return fmt.Errorf("RegisterPeerPicker called more than once")
 	}
 	portPicker = func(_ string) PeerPicker { return fn() }
+	return nil
 }
 
 // RegisterPerGroupPeerPicker registers the peer initialization function,
@@ -69,11 +71,12 @@ func RegisterPeerPicker(fn func() PeerPicker) {
 // It is called once, when the first group is created.
 // Either RegisterPeerPicker or RegisterPerGroupPeerPicker should be
 // called exactly once, but not both.
-func RegisterPerGroupPeerPicker(fn func(groupName string) PeerPicker) {
+func RegisterPerGroupPeerPicker(fn func(groupName string) PeerPicker) error {
 	if portPicker != nil {
-		panic("RegisterPeerPicker called more than once")
+		return fmt.Errorf("RegisterPeerPicker called more than once")
 	}
 	portPicker = fn
+	return nil
 }
 
 func getPeers(groupName string) PeerPicker {
