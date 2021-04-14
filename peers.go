@@ -71,11 +71,12 @@ func RegisterPeerPicker(fn func() PeerPicker) error {
 // It is called once, when the first group is created.
 // Either RegisterPeerPicker or RegisterPerGroupPeerPicker should be
 // called exactly once, but not both.
-func RegisterPerGroupPeerPicker(fn func(groupName string) PeerPicker) {
+func RegisterPerGroupPeerPicker(fn func(groupName string) PeerPicker) error {
 	if portPicker != nil {
-		panic("RegisterPeerPicker called more than once")
+		return fmt.Errorf("RegisterPeerPicker called more than once")
 	}
 	portPicker = fn
+	return nil
 }
 
 func getPeers(groupName string) PeerPicker {

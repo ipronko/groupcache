@@ -182,20 +182,22 @@ var newGroupHook func(*Group)
 
 // RegisterNewGroupHook registers a hook that is run each time
 // a group is created.
-func RegisterNewGroupHook(fn func(*Group)) {
+func RegisterNewGroupHook(fn func(*Group)) error {
 	if newGroupHook != nil {
-		panic("RegisterNewGroupHook called more than once")
+		return fmt.Errorf("RegisterNewGroupHook called more than once")
 	}
 	newGroupHook = fn
+	return nil
 }
 
 // RegisterServerStart registers a hook that is run when the first
 // group is created.
-func RegisterServerStart(fn func()) {
+func RegisterServerStart(fn func()) error {
 	if initPeerServer != nil {
-		panic("RegisterServerStart called more than once")
+		return fmt.Errorf("RegisterServerStart called more than once")
 	}
 	initPeerServer = fn
+	return nil
 }
 
 func callInitPeerServer() {
