@@ -104,6 +104,7 @@ func _TestHTTPPool(t *testing.T) {
 	}
 	_, err = NewHTTPPoolOpts(context.Background(), "ignored", &HTTPPoolOptions{
 		ServiceDiscovery: sd,
+		Auth:             "auth",
 	})
 	if err != nil {
 		panic(err)
@@ -197,6 +198,7 @@ func beChildForTestHTTPPool(t *testing.T) {
 
 	p, err := NewHTTPPoolOpts(context.Background(), "http://"+addrs[*peerIndex], &HTTPPoolOptions{
 		ServiceDiscovery: sd,
+		Auth:             "auth",
 	})
 	if err != nil {
 		panic(err)
