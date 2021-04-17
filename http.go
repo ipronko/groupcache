@@ -135,7 +135,9 @@ func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTT
 	}
 
 	if p.opts.ServiceDiscovery != nil {
-		err := p.opts.ServiceDiscovery.Register(self, fmt.Sprintf("%s/%s", self, filepath.Join(p.opts.BasePath, "health")))
+		base := strings.TrimPrefix(p.opts.BasePath, "/")
+		self := strings.TrimSuffix(self, "/")
+		err := p.opts.ServiceDiscovery.Register(self, fmt.Sprintf("%s/%s", self, filepath.Join(base, "health")))
 		if err != nil {
 			return nil, err
 		}
