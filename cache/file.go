@@ -65,10 +65,9 @@ func NewFile(maxSize int64, opts FileOptions) (*fileCache, error) {
 	return c, nil
 }
 
-func onEvict(key, value interface{}, logger Logger) {
+func onEvict(value interface{}, logger Logger) {
 	val, ok := value.(file)
 	if !ok {
-		logger.Errorf("evict file %s, wrong value type %T", key, value)
 		return
 	}
 	err := val.delete()

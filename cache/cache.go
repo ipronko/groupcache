@@ -52,7 +52,7 @@ func getCache(maxSize int64, opts Options) (*ristretto.Cache, error) {
 	}
 
 	config.OnEvict = func(key, conflict uint64, value interface{}, cost int64) {
-		onEvict(key, value, opts.Logger)
+		onEvict(value, opts.Logger)
 	}
 
 	rCache, err := ristretto.NewCache(config)
