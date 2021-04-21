@@ -44,7 +44,7 @@ const (
 )
 
 type ServiceDiscovery interface {
-	Register(serviceAddr, httpHealthAddr string) error
+	Register(serviceURL, healthURL *url.URL) error
 	Watch(ctx context.Context, watchFunc func(addr ...string)) error
 }
 
@@ -135,9 +135,15 @@ func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTT
 	}
 
 	if p.opts.ServiceDiscovery != nil {
-		base := strings.TrimPrefix(p.opts.BasePath, "/")
-		self := strings.TrimSuffix(self, "/")
-		err := p.opts.ServiceDiscovery.Register(self, fmt.Sprintf("%s/%s", self, filepath.Join(base, "health")))
+		u, err := url.Parse(self)
+		if err != nil {
+			return nil, fmt.Errorf("parse self url err %w", err)
+		}
+		healthU, err := u.Parse(filepath.Join(p.opts.BasePath, "health"))
+		if err != nil {
+			return nil, fmt.Errorf("parse health url err %w", err)
+		}
+		err = p.opts.ServiceDiscovery.Register(u, healthU)
 		if err != nil {
 			return nil, err
 		}

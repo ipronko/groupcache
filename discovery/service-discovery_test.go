@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -35,7 +36,9 @@ func runSD(ctx context.Context, id, addr string) {
 
 	runServer(ctx, addr)
 	serviceAddr := fmt.Sprintf("http://localhost%s", addr)
-	err = discovery.Register(serviceAddr, serviceAddr)
+	u, err := url.Parse(serviceAddr)
+	check(err)
+	err = discovery.Register(u, u)
 	check(err)
 
 	discovery.Watch(ctx, func(addr ...string) {

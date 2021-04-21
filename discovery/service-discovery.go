@@ -2,8 +2,12 @@ package discovery
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/consul/api"
@@ -62,19 +66,50 @@ type ServiceDiscovery struct {
 	failTTL     time.Duration
 }
 
-func (s *ServiceDiscovery) Register(serviceAddr, httpHealthAddr string) error {
+func (s *ServiceDiscovery) Register(serviceURL *url.URL, healthURL *url.URL) error {
+	scheme, host, port, err := splitAddr(serviceURL)
+	if err != nil {
+		return fmt.Errorf("split addr err: %s", err)
+	}
+
 	reg := &api.AgentServiceRegistration{
 		Name:    s.serviceName,
 		ID:      s.serviceID,
-		Address: serviceAddr,
+		Address: fmt.Sprintf("%s://%s", scheme, host),
+		Port:    port,
 		Check: &api.AgentServiceCheck{
-			HTTP:          httpHealthAddr,
+			HTTP:          healthURL.String(),
 			Interval:      s.failTTL.String(),
 			TLSSkipVerify: true,
 		},
 	}
 
 	return s.agent.ServiceRegister(reg)
+}
+
+func splitAddr(u *url.URL) (string, string, int, error) {
+	if strings.Contains(u.Host, ":") {
+		split := strings.Split(u.Host, ":")
+		if len(split) != 2 {
+			return "", "", 0, fmt.Errorf("splited host and port must contain two values")
+		}
+		host := split[0]
+		portStr := split[1]
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return "", "", 0, fmt.Errorf("parse int from service port")
+		}
+		return u.Scheme, host, port, nil
+	}
+
+	var port int
+	if u.Scheme == "https" {
+		port = 443
+	}
+	if u.Scheme == "http" {
+		port = 80
+	}
+	return u.Scheme, u.Host, port, nil
 }
 
 func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc func(addr ...string)) error {
