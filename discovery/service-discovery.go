@@ -134,7 +134,7 @@ func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc func(addr ...str
 				continue
 			}
 
-			currentState = append(currentState, service.Service.Address)
+			currentState = append(currentState, fmt.Sprintf("%s:%d", service.Service.Address, service.Service.Port))
 		}
 
 		sort.Strings(currentState)

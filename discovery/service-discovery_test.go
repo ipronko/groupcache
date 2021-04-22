@@ -14,7 +14,7 @@ import (
 var serviceName = "groupcache"
 
 // Test with local consul
-func _Test_SD(t *testing.T) {
+func Test_SD(t *testing.T) {
 	go runSD(context.Background(), "1", ":8081")
 	go runSD(context.Background(), "2", ":8082")
 	ctx, cancel := context.WithCancel(context.Background())
