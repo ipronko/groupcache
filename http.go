@@ -19,9 +19,11 @@ package groupcache
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -42,6 +44,20 @@ const (
 	sizeHeader   = "X-Size"
 	expireHeader = "X-Expire"
 )
+
+var transport http.RoundTripper = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          100,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+}
 
 type ServiceDiscovery interface {
 	Register(serviceURL, healthURL *url.URL) error
@@ -292,7 +308,7 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequ
 		req.Header.Add("Authorization", h.auth)
 	}
 
-	tr := http.DefaultTransport
+	tr := transport
 	if h.getTransport != nil {
 		tr = h.getTransport(ctx)
 	}
