@@ -101,7 +101,7 @@ func (c *fileCache) restoreFiles() {
 	fileCh := make(chan file)
 	go func() {
 		err := c.fileResolver.walk(fileCh)
-		if err != nil && c.logger != nil {
+		if err != nil {
 			c.logger.Errorf("add existing files to cache: file walk err: %s", err.Error())
 		}
 	}()
@@ -152,13 +152,8 @@ func (c *fileCache) set(key string, value *view.View) error {
 		}()
 
 		wrote, err := io.CopyBuffer(tmpFile, teeReader, bullPool)
-		if err != nil && c.logger != nil {
+		if err != nil {
 			c.logger.Errorf("copy from reader to bytes buffer err: %s", err.Error())
-			return
-		}
-
-		if wrote != value.Len() {
-			c.logger.Errorf("wrote %d, value size %d", wrote, value.Len())
 			return
 		}
 
@@ -198,7 +193,7 @@ func (c *fileCache) Get(key string) (v *view.View, ok bool) {
 func (c *fileCache) Remove(key string) {
 	c.cache.Del(key)
 	err := c.fileResolver.delete(key)
-	if err != nil && c.logger != nil {
+	if err != nil {
 		c.logger.Errorf("delete %s key err: %s", key, err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"time"
 
 	"github.com/dgraph-io/ristretto"
@@ -101,10 +102,11 @@ func (c *cache) Add(key string, value *view.View) error {
 
 func (c *cache) set(key string, value *view.View) error {
 	if value.Len() <= c.lilFile {
-		buff, err := c.readAndSet(key, value, value.Len(), value.Expire())
+		buff, err := c.readAndSet(key, value, value.Expire())
 		if err != nil {
 			return err
 		}
+		value.Close()
 		value.SwapReader(buff)
 		return nil
 	}
@@ -121,7 +123,7 @@ func (c *cache) set(key string, value *view.View) error {
 			}
 		}()
 
-		_, err := c.readAndSet(key, teeReader, value.Len(), value.Expire())
+		_, err := c.readAndSet(key, ioutil.NopCloser(teeReader), value.Expire())
 		if err != nil {
 			c.logger.Errorf("read and set err: %s", err.Error())
 			return
@@ -130,24 +132,21 @@ func (c *cache) set(key string, value *view.View) error {
 	return nil
 }
 
-func (c *cache) readAndSet(key string, rc io.Reader, len int64, expire time.Duration) (*bytes.Buffer, error) {
+func (c *cache) readAndSet(key string, r io.Reader, expire time.Duration) (*bytes.Buffer, error) {
 	bullPool := c.bufPool.Get()
 	defer c.bufPool.Put(bullPool)
 
 	buff := bytes.NewBuffer(nil)
-	wrote, err := io.CopyBuffer(buff, rc, bullPool)
-	if err != nil && c.logger != nil {
-		return nil, fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
+	wrote, err := io.CopyBuffer(buff, r, bullPool)
+	if err != nil {
+		err = fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
+		c.logger.Errorf(err.Error())
+		return nil, err
 	}
 
-	if wrote != len {
-		return nil, fmt.Errorf("wrote %d, value size %d", wrote, len)
-	}
-
-	data := buff.Bytes()
 	c.cache.SetWithTTL(key, byteValue{
 		ttl:  expire,
-		data: data,
+		data: buff.Bytes(),
 	}, wrote, expire)
 
 	return buff, nil

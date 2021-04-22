@@ -149,7 +149,7 @@ func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTT
 		}
 		go func() {
 			err := p.opts.ServiceDiscovery.Watch(ctx, p.Set)
-			if err != nil {
+			if err != nil && logger != nil {
 				logger.Errorf("watch to service updates err: %s", err.Error())
 			}
 		}()

@@ -119,8 +119,7 @@ func TestCachingExpire(t *testing.T) {
 	fills := countFills(func() {
 		for i := 0; i < 3; i++ {
 			if i == 1 {
-				//time.Sleep(time.Millisecond * 150)
-				time.Sleep(time.Minute)
+				time.Sleep(time.Millisecond * 150)
 			}
 			v, err := fileGroup.Get(dummyCtx, "TestCachingExpire-key")
 			if err != nil {
@@ -174,7 +173,7 @@ func TestCacheEviction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bytesFlooded += int64(len(key) + int(v.Len()))
+		bytesFlooded += v.Len()
 	}
 	time.Sleep(10 * time.Millisecond)
 	evicts := g.mainCache.Stats().Evictions - evict0
@@ -323,28 +322,6 @@ func TestPeers(t *testing.T) {
 	peerList[0] = peer0
 	peer0.fail = true
 	run("peer0_failing", 200, "localHits = 100, peers = 51 49 51")
-}
-
-// orderedFlightGroup allows the caller to force the schedule of when
-// orig.Do will be called.  This is useful to serialize calls such
-// that singleflight cannot dedup them.
-type orderedFlightGroup struct {
-	mu     sync.Mutex
-	stage1 chan bool
-	stage2 chan bool
-	orig   flightGroup
-}
-
-func (g *orderedFlightGroup) Do(key string, fn func() (interface{}, error)) (interface{}, error) {
-	<-g.stage1
-	<-g.stage2
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.orig.Do(key, fn)
-}
-
-func (g *orderedFlightGroup) Lock(fn func()) {
-	fn()
 }
 
 func TestGroupStatsAlignment(t *testing.T) {
