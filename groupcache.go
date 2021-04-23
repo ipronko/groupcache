@@ -93,12 +93,12 @@ type CombinedArgs struct {
 }
 
 func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts cache.Options, fileOpts cache.FileOptions) (*Group, error) {
-	fileGroup, err := NewFile(fmt.Sprintf("%s_%s", name, "file"), fileSize, getter, fileOpts)
+	fileGroup, err := NewFile(fmt.Sprintf("%s_%s", name, "file"), fileSize, getter, false, fileOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	memGroup, err := NewMemory(fmt.Sprintf("%s_%s", name, "memory"), memorySize, fileGroup, memOpts)
+	memGroup, err := NewMemory(name, memorySize, fileGroup, false, memOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -106,39 +106,52 @@ func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts
 	return memGroup, nil
 }
 
-func NewMemory(name string, cacheBytes int64, getter Getter, cacheOpts cache.Options) (*Group, error) {
-	main, err := cache.NewMemory(cacheBytes*7/8, cacheOpts)
+func NewMemory(name string, cacheBytes int64, getter Getter, lastInCombo bool, cacheOpts cache.Options) (*Group, error) {
+	var mainCacheBytes = cacheBytes
+	var hotCache cache.ViewCache
+	var err error
+	if !lastInCombo {
+		hotCache, err = cache.NewMemory(cacheBytes/8, cacheOpts)
+		if err != nil {
+			return nil, fmt.Errorf("creating hot cache err: %w", err)
+		}
+		mainCacheBytes = cacheBytes * 7 / 8
+	}
+
+	main, err := cache.NewMemory(mainCacheBytes, cacheOpts)
 	if err != nil {
 		return nil, fmt.Errorf("creating main cache err: %w", err)
 	}
 
-	hot, err := cache.NewMemory(cacheBytes/8, cacheOpts)
-	if err != nil {
-		return nil, fmt.Errorf("creating hot cache err: %w", err)
-	}
-
-	return newGroup(name, getter, nil, main, hot)
+	return newGroup(name, getter, nil, main, hotCache, lastInCombo)
 }
 
-func NewFile(name string, cacheBytes int64, getter Getter, cacheOpts cache.FileOptions) (*Group, error) {
+func NewFile(name string, cacheBytes int64, getter Getter, lastInCombo bool, cacheOpts cache.FileOptions) (*Group, error) {
 	originRoot := cacheOpts.RootPath
 	if originRoot == "" {
 		originRoot = os.TempDir()
 	}
 
+	var mainCacheBytes = cacheBytes
+	var hotCache cache.ViewCache
+	var err error
+
+	if !lastInCombo {
+		cacheOpts.RootPath = filepath.Join(originRoot, groupcacheSubdir, "hot")
+		hotCache, err = cache.NewFile(cacheBytes/8, cacheOpts)
+		if err != nil {
+			return nil, fmt.Errorf("creating hot cache err: %w", err)
+		}
+		mainCacheBytes = cacheBytes * 7 / 8
+	}
+
 	cacheOpts.RootPath = filepath.Join(originRoot, groupcacheSubdir, "main")
-	main, err := cache.NewFile(cacheBytes*7/8, cacheOpts)
+	main, err := cache.NewFile(mainCacheBytes, cacheOpts)
 	if err != nil {
 		return nil, fmt.Errorf("creating main cache err: %w", err)
 	}
 
-	cacheOpts.RootPath = filepath.Join(originRoot, groupcacheSubdir, "hot")
-	hot, err := cache.NewFile(cacheBytes/8, cacheOpts)
-	if err != nil {
-		return nil, fmt.Errorf("creating hot cache err: %w", err)
-	}
-
-	return newGroup(name, getter, nil, main, hot)
+	return newGroup(name, getter, nil, main, hotCache, lastInCombo)
 }
 
 // DeregisterGroup removes group from group pool
@@ -149,7 +162,7 @@ func DeregisterGroup(name string) {
 }
 
 // If peers is nil, the peerPicker is called via a sync.Once to initialize it.
-func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.ViewCache) (*Group, error) {
+func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.ViewCache, lastInGroup bool) (*Group, error) {
 	if getter == nil {
 		return nil, fmt.Errorf("nil Getter")
 	}
@@ -167,6 +180,7 @@ func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.View
 		mainCache:   main,
 		peers:       peers,
 		hotCache:    hot,
+		lastGroup:   lastInGroup,
 		loadGroup:   &singleflight.Group{},
 		removeGroup: &singleflight.Group{},
 	}
@@ -213,6 +227,7 @@ type Group struct {
 	getter    Getter
 	peersOnce sync.Once
 	peers     PeerPicker
+	lastGroup bool
 
 	// mainCache is a cache of the keys for which this process
 	// (amongst its peers) is authoritative. That is, this cache
@@ -349,7 +364,7 @@ func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 
 	var value *view.View
 	var err error
-	if peer, ok := g.peers.PickPeer(key); ok {
+	if peer, ok := g.peers.PickPeer(key); ok && g.lastGroup {
 
 		// metrics duration start
 		start := time.Now()
@@ -431,14 +446,19 @@ func (g *Group) lookupCache(key string) (view *view.View, ok bool) {
 	if ok {
 		return view, ok
 	}
-	return g.hotCache.Get(key)
+	if g.hotCache != nil {
+		return g.hotCache.Get(key)
+	}
+	return nil, false
 }
 
 func (g *Group) localRemove(key string) {
 	// Ensure no requests are in flight
 	g.loadGroup.Lock(func() {
-		g.hotCache.Remove(key)
 		g.mainCache.Remove(key)
+		if g.hotCache != nil {
+			g.hotCache.Remove(key)
+		}
 	})
 }
 
@@ -462,10 +482,11 @@ func (g *Group) CacheStats(which CacheType) cache.CacheStats {
 	case MainCache:
 		return g.mainCache.Stats()
 	case HotCache:
-		return g.hotCache.Stats()
-	default:
-		return cache.CacheStats{}
+		if g.hotCache != nil {
+			return g.hotCache.Stats()
+		}
 	}
+	return cache.CacheStats{}
 }
 
 // An AtomicInt is an int64 to be accessed atomically.

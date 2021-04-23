@@ -120,7 +120,7 @@ func _TestHTTPPool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	g, err := NewMemory("httpPoolTest", 1<<20, getter, cache.Options{
+	g, err := NewMemory("httpPoolTest", 1<<20, getter, true, cache.Options{
 		MaxInstanceSize: 1 << 20,
 		Logger:          logrus.New(),
 	})
@@ -213,7 +213,7 @@ func beChildForTestHTTPPool(t *testing.T) {
 		buffer.Write([]byte(strconv.Itoa(*peerIndex) + ":" + key))
 		return view.NewView(ioutil.NopCloser(buffer), int64(buffer.Len()), 0), nil
 	})
-	_, err = NewMemory("httpPoolTest", 1<<20, getter, cache.Options{Logger: logrus.New()})
+	_, err = NewMemory("httpPoolTest", 1<<20, getter, true, cache.Options{Logger: logrus.New()})
 	if err != nil {
 		panic(err)
 	}

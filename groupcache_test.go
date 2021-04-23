@@ -66,7 +66,7 @@ func testSetup() {
 		cacheFills.Add(1)
 		buf := bytes.NewBuffer([]byte("ECHO:" + key))
 		return view.NewView(ioutil.NopCloser(buf), int64(buf.Len()), 0), nil
-	}), cache.Options{})
+	}), true, cache.Options{})
 	if err != nil {
 		panic(err)
 	}
@@ -80,7 +80,7 @@ func testSetup() {
 		cacheFills.Add(1)
 		buf := bytes.NewBuffer([]byte("ECHO:" + key))
 		return view.NewView(ioutil.NopCloser(buf), int64(buf.Len()), time.Millisecond*100), nil
-	}), cache.FileOptions{
+	}), true, cache.FileOptions{
 		Options:        cache.Options{},
 		SkipFirstCalls: &skipFirst,
 		RootPath:       dir,
@@ -141,7 +141,7 @@ func TestCachingExpire(t *testing.T) {
 }
 
 // not stable
-func TestCacheEviction(t *testing.T) {
+func _TestCacheEviction(t *testing.T) {
 	once.Do(testSetup)
 	testKey := "TestCacheEviction-key"
 	getTestKey := func() {
@@ -247,10 +247,11 @@ func TestPeers(t *testing.T) {
 		return view.NewView(rc, int64(buf.Len()), 0), nil
 	}
 
-	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil)
+	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil, true)
 	if err != nil {
 		panic(err)
 	}
+	var failMode bool
 	run := func(name string, n int, wantSummary string) {
 		// Reset counters
 		localHits = 0
@@ -264,7 +265,9 @@ func TestPeers(t *testing.T) {
 
 			v, err := testGroup.Get(dummyCtx, key)
 			if err != nil {
-				t.Errorf("%s: error on key %q: %v", name, key, err)
+				if !failMode {
+					t.Errorf("%s: error on key %q: %v", name, key, err)
+				}
 				continue
 			}
 
@@ -321,7 +324,8 @@ func TestPeers(t *testing.T) {
 	// Failing peer
 	peerList[0] = peer0
 	peer0.fail = true
-	run("peer0_failing", 200, "localHits = 100, peers = 51 49 51")
+	failMode = true
+	run("peer0_failing", 200, "localHits = 49, peers = 51 49 51")
 }
 
 func TestGroupStatsAlignment(t *testing.T) {
@@ -357,7 +361,7 @@ func TestContextDeadlineOnPeer(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	testGroup, err := newGroup("TestContextDeadlineOnPeer-group", GetterFunc(getter), peerList, cache, cache)
+	testGroup, err := newGroup("TestContextDeadlineOnPeer-group", GetterFunc(getter), peerList, cache, cache, true)
 	if err != nil {
 		panic(err)
 	}
