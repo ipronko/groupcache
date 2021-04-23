@@ -93,7 +93,7 @@ type CombinedArgs struct {
 }
 
 func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts cache.Options, fileOpts cache.FileOptions) (*Group, error) {
-	fileGroup, err := NewFile(fmt.Sprintf("%s_%s", name, "file"), fileSize, getter, false, fileOpts)
+	fileGroup, err := NewFile(fmt.Sprintf("%s_%s", name, "file"), fileSize, getter, true, fileOpts)
 	if err != nil {
 		return nil, err
 	}
