@@ -165,7 +165,13 @@ func (c *fileCache) set(key string, value *view.View) error {
 			return
 		}
 
-		c.cache.SetWithTTL(key, file, wrote, value.Expire())
+		ok := c.cache.SetWithTTL(key, file, wrote, value.Expire())
+		if !ok {
+			err := c.fileResolver.delete(key)
+			if err != nil {
+				c.logger.Errorf("copy from reader to bytes buffer err: %s", err.Error())
+			}
+		}
 	}()
 
 	return nil

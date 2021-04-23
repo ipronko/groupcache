@@ -261,7 +261,6 @@ type Stats struct {
 	PeerLoads                AtomicInt // either remote load or remote cache hit (not an error)
 	PeerErrors               AtomicInt
 	Loads                    AtomicInt // (gets - cacheHits)
-	LoadsDeduped             AtomicInt // after singleflight
 	LocalLoads               AtomicInt // total good local loads
 	LocalLoadErrs            AtomicInt // total bad local loads
 	ServerRequests           AtomicInt // gets that came over the network from peers
@@ -348,7 +347,6 @@ func (g *Group) Remove(ctx context.Context, key string) error {
 func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 	g.Stats.Loads.Add(1)
 
-	g.Stats.LoadsDeduped.Add(1)
 	var value *view.View
 	var err error
 	if peer, ok := g.peers.PickPeer(key); ok {
@@ -381,9 +379,7 @@ func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 		}
 
 		g.Stats.PeerErrors.Add(1)
-		if ctx != nil && ctx.Err() != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	value, err = g.getLocally(ctx, key)

@@ -14,10 +14,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	consulStatusPass = "passing"
-)
-
 type Logger interface {
 	Errorf(template string, args ...interface{})
 }
@@ -46,7 +42,7 @@ func New(consulAddr, serviceName, serviceID string, opts ...Option) (*ServiceDis
 		return nil, errors.WithMessage(err, "create new consul client")
 	}
 	sd := &ServiceDiscovery{
-		agent:       client.Agent(),
+		client:      client,
 		serviceName: serviceName,
 		serviceID:   serviceID,
 		failTTL:     10 * time.Second,
@@ -59,7 +55,7 @@ func New(consulAddr, serviceName, serviceID string, opts ...Option) (*ServiceDis
 }
 
 type ServiceDiscovery struct {
-	agent       *api.Agent
+	client      *api.Client
 	logger      Logger
 	serviceName string
 	serviceID   string
@@ -78,13 +74,14 @@ func (s *ServiceDiscovery) Register(serviceURL *url.URL, healthURL *url.URL) err
 		Address: fmt.Sprintf("%s://%s", scheme, host),
 		Port:    port,
 		Check: &api.AgentServiceCheck{
-			HTTP:          healthURL.String(),
-			Interval:      s.failTTL.String(),
-			TLSSkipVerify: true,
+			HTTP:                           healthURL.String(),
+			Interval:                       s.failTTL.String(),
+			TLSSkipVerify:                  true,
+			DeregisterCriticalServiceAfter: "1h",
 		},
 	}
 
-	return s.agent.ServiceRegister(reg)
+	return s.client.Agent().ServiceRegister(reg)
 }
 
 func splitAddr(u *url.URL) (string, string, int, error) {
@@ -118,11 +115,11 @@ func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc func(addr ...str
 	for {
 		select {
 		case <-ctx.Done():
-			return s.agent.ServiceDeregister(s.serviceID)
+			return s.client.Agent().ServiceDeregister(s.serviceID)
 		case <-t.C:
 		}
 
-		_, services, err := s.agent.AgentHealthServiceByName(s.serviceName)
+		services, _, err := s.client.Health().Service(s.serviceName, "", true, &api.QueryOptions{})
 		if err != nil {
 			s.logger.Errorf("get list of services from consul err: %s", err.Error())
 			continue
@@ -130,10 +127,6 @@ func (s *ServiceDiscovery) Watch(ctx context.Context, watchFunc func(addr ...str
 
 		currentState := make([]string, 0, len(services))
 		for _, service := range services {
-			if service.AggregatedStatus != consulStatusPass {
-				continue
-			}
-
 			currentState = append(currentState, fmt.Sprintf("%s:%d", service.Service.Address, service.Service.Port))
 		}
 
