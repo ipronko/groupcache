@@ -93,12 +93,12 @@ type CombinedArgs struct {
 }
 
 func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts cache.Options, fileOpts cache.FileOptions) (*Group, error) {
-	fileGroup, err := NewFile(fmt.Sprintf("%s_%s", name, "file"), fileSize, getter, true, fileOpts)
+	fileGroup, err := newFileGroup(name, fileSize, getter, true, false, fileOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	memGroup, err := NewMemory(name, memorySize, fileGroup, false, memOpts)
+	memGroup, err := newMemoryGroup(name, memorySize, fileGroup, false, true, memOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -106,11 +106,15 @@ func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts
 	return memGroup, nil
 }
 
-func NewMemory(name string, cacheBytes int64, getter Getter, lastInCombo bool, cacheOpts cache.Options) (*Group, error) {
+func NewMemory(name string, cacheBytes int64, getter Getter, cacheOpts cache.Options) (*Group, error) {
+	return newMemoryGroup(name, cacheBytes, getter, true, true, cacheOpts)
+}
+
+func newMemoryGroup(name string, cacheBytes int64, getter Getter, lastInCombo, register bool, cacheOpts cache.Options) (*Group, error) {
 	var mainCacheBytes = cacheBytes
 	var hotCache cache.ViewCache
 	var err error
-	if !lastInCombo {
+	if lastInCombo {
 		hotCache, err = cache.NewMemory(cacheBytes/8, cacheOpts)
 		if err != nil {
 			return nil, fmt.Errorf("creating hot cache err: %w", err)
@@ -123,10 +127,13 @@ func NewMemory(name string, cacheBytes int64, getter Getter, lastInCombo bool, c
 		return nil, fmt.Errorf("creating main cache err: %w", err)
 	}
 
-	return newGroup(name, getter, nil, main, hotCache, lastInCombo)
+	return newGroup(name, getter, nil, main, hotCache, lastInCombo, register)
+}
+func NewFile(name string, cacheBytes int64, getter Getter, cacheOpts cache.FileOptions) (*Group, error) {
+	return newFileGroup(name, cacheBytes, getter, true, true, cacheOpts)
 }
 
-func NewFile(name string, cacheBytes int64, getter Getter, lastInCombo bool, cacheOpts cache.FileOptions) (*Group, error) {
+func newFileGroup(name string, cacheBytes int64, getter Getter, lastInCombo, register bool, cacheOpts cache.FileOptions) (*Group, error) {
 	originRoot := cacheOpts.RootPath
 	if originRoot == "" {
 		originRoot = os.TempDir()
@@ -136,7 +143,7 @@ func NewFile(name string, cacheBytes int64, getter Getter, lastInCombo bool, cac
 	var hotCache cache.ViewCache
 	var err error
 
-	if !lastInCombo {
+	if lastInCombo {
 		cacheOpts.RootPath = filepath.Join(originRoot, groupcacheSubdir, "hot")
 		hotCache, err = cache.NewFile(cacheBytes/8, cacheOpts)
 		if err != nil {
@@ -151,7 +158,7 @@ func NewFile(name string, cacheBytes int64, getter Getter, lastInCombo bool, cac
 		return nil, fmt.Errorf("creating main cache err: %w", err)
 	}
 
-	return newGroup(name, getter, nil, main, hotCache, lastInCombo)
+	return newGroup(name, getter, nil, main, hotCache, lastInCombo, register)
 }
 
 // DeregisterGroup removes group from group pool
@@ -162,7 +169,7 @@ func DeregisterGroup(name string) {
 }
 
 // If peers is nil, the peerPicker is called via a sync.Once to initialize it.
-func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.ViewCache, lastInGroup bool) (*Group, error) {
+func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.ViewCache, lastInGroup, register bool) (*Group, error) {
 	if getter == nil {
 		return nil, fmt.Errorf("nil Getter")
 	}
@@ -170,8 +177,10 @@ func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.View
 	defer mu.Unlock()
 
 	initPeerServerOnce.Do(callInitPeerServer)
-	if _, dup := groups[name]; dup {
-		return nil, fmt.Errorf("duplicate registration of group " + name)
+	if register {
+		if _, dup := groups[name]; dup {
+			return nil, fmt.Errorf("duplicate registration of group " + name)
+		}
 	}
 
 	g := &Group{
@@ -187,7 +196,9 @@ func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.View
 	if fn := newGroupHook; fn != nil {
 		fn(g)
 	}
-	groups[name] = g
+	if register {
+		groups[name] = g
+	}
 	return g, nil
 }
 
