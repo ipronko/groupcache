@@ -37,7 +37,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/ipronko/groupcache/cache"
-	//"github.com/ipronko/groupcache/lru"
 	"github.com/ipronko/groupcache/singleflight"
 	"github.com/ipronko/groupcache/view"
 )

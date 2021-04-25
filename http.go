@@ -291,10 +291,10 @@ var bufferPool = sync.Pool{
 
 func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequest, out *http.Response) error {
 	u := fmt.Sprintf(
-		"%v%v/%v",
-		h.baseURL,
-		url.QueryEscape(in.Group),
-		url.QueryEscape(in.Key),
+		"%v/%v/%v",
+		strings.TrimSuffix(h.baseURL, "/"),
+		strings.TrimPrefix(url.QueryEscape(in.Group), "/"),
+		strings.TrimPrefix(url.QueryEscape(in.Key), "/"),
 	)
 	req, err := http.NewRequest(method, u, nil)
 	if err != nil {
