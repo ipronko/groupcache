@@ -205,14 +205,13 @@ func (c *fileCache) Remove(key string) {
 }
 
 const (
-	firstDir = "groupcache"
 	tempPath = "tmp"
 	filePath = "file"
 )
 
 func newFileResolver(rootDir string) (*fileResolver, error) {
-	tmpRoot := filepath.Join(rootDir, firstDir, tempPath)
-	fileRoot := filepath.Join(rootDir, firstDir, filePath)
+	tmpRoot := filepath.Join(rootDir, tempPath)
+	fileRoot := filepath.Join(rootDir, filePath)
 
 	if err := os.MkdirAll(tmpRoot, 0700); err != nil && !os.IsExist(err) {
 		return nil, fmt.Errorf("create dirs for tmp files")

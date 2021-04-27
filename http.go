@@ -124,7 +124,7 @@ var httpPoolMade bool
 // NewHTTPPoolOpts initializes an HTTP pool of peers with the given options.
 // Unlike NewHTTPPool, this function does not register the created pool as an HTTP handler.
 // The returned *HTTPPool implements http.Handler and must be registered using http.Handle.
-func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTTPPool, error) {
+func NewHTTPPoolOpts(ctx context.Context, self string, opts *HTTPPoolOptions) (*HTTPPool, error) {
 	if httpPoolMade {
 		return nil, fmt.Errorf("groupcache: NewHTTPPool must be called only once")
 	}
@@ -134,11 +134,13 @@ func NewHTTPPoolOpts(ctx context.Context, self string, o *HTTPPoolOptions) (*HTT
 		self:        self,
 		httpGetters: make(map[string]*httpGetter),
 	}
-	if o != nil {
-		p.opts = *o
+	if opts != nil {
+		p.opts = *opts
 	}
 	if p.opts.BasePath == "" {
 		p.opts.BasePath = defaultBasePath
+	} else if !strings.HasSuffix(p.opts.BasePath, "/") {
+		p.opts.BasePath = p.opts.BasePath + "/"
 	}
 	if p.opts.Replicas == 0 {
 		p.opts.Replicas = defaultReplicas
@@ -280,7 +282,6 @@ type httpGetter struct {
 	auth         string
 }
 
-// GetURL
 func (h *httpGetter) GetURL() string {
 	return h.baseURL
 }
@@ -293,8 +294,8 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequ
 	u := fmt.Sprintf(
 		"%v/%v/%v",
 		strings.TrimSuffix(h.baseURL, "/"),
-		strings.TrimPrefix(url.QueryEscape(in.Group), "/"),
-		strings.TrimPrefix(url.QueryEscape(in.Key), "/"),
+		in.Group,
+		in.Key,
 	)
 	req, err := http.NewRequest(method, u, nil)
 	if err != nil {

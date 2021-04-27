@@ -128,6 +128,7 @@ func newMemoryGroup(name string, cacheBytes int64, getter Getter, lastInCombo, r
 
 	return newGroup(name, getter, nil, main, hotCache, lastInCombo, register)
 }
+
 func NewFile(name string, cacheBytes int64, getter Getter, cacheOpts cache.FileOptions) (*Group, error) {
 	return newFileGroup(name, cacheBytes, getter, true, true, cacheOpts)
 }
@@ -404,7 +405,7 @@ func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 		}
 
 		g.Stats.PeerErrors.Add(1)
-		return nil, err
+		//return nil, err
 	}
 
 	value, err = g.getLocally(ctx, key)
@@ -425,7 +426,6 @@ func (g *Group) getLocally(ctx context.Context, key string) (*view.View, error) 
 
 	err = g.mainCache.Add(key, v)
 	return v, err
-
 }
 
 func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string) (*view.View, error) {
