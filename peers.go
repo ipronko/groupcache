@@ -25,10 +25,11 @@ import (
 	"github.com/ipronko/groupcache/view"
 )
 
-// ProtoGetter is the interface that must be implemented by a peer.
-type ProtoGetter interface {
-	Get(context context.Context, in *GetRequest) (*view.View, error)
-	Remove(context context.Context, in *GetRequest) error
+// HTTPGetter is the interface that must be implemented by a peer.
+type HTTPGetter interface {
+	Get(context context.Context, in *Request) (*view.View, error)
+	WarmUp(context context.Context, in *Request) error
+	Remove(context context.Context, in *Request) error
 	// GetURL returns the peer URL
 	GetURL() string
 }
@@ -39,16 +40,16 @@ type PeerPicker interface {
 	// PickPeer returns the peer that owns the specific key
 	// and true to indicate that a remote peer was nominated.
 	// It returns nil, false if the key owner is the current peer.
-	PickPeer(key string) (peer ProtoGetter, ok bool)
+	PickPeer(key string) (peer HTTPGetter, ok bool)
 	// GetAll returns all the peers in the group
-	GetAll() []ProtoGetter
+	GetAll() []HTTPGetter
 }
 
 // NoPeers is an implementation of PeerPicker that never finds a peer.
 type NoPeers struct{}
 
-func (NoPeers) PickPeer(key string) (peer ProtoGetter, ok bool) { return }
-func (NoPeers) GetAll() []ProtoGetter                           { return []ProtoGetter{} }
+func (NoPeers) PickPeer(key string) (peer HTTPGetter, ok bool) { return }
+func (NoPeers) GetAll() []HTTPGetter                           { return []HTTPGetter{} }
 
 var (
 	portPicker func(groupName string) PeerPicker

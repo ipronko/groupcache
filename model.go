@@ -1,6 +1,6 @@
 package groupcache
 
-type GetRequest struct {
+type Request struct {
 	Group string
 	Key   string
 }

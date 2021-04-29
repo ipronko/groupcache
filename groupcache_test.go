@@ -194,7 +194,7 @@ type fakePeer struct {
 	fail bool
 }
 
-func (p *fakePeer) Get(_ context.Context, in *GetRequest) (*view.View, error) {
+func (p *fakePeer) Get(_ context.Context, in *Request) (*view.View, error) {
 	p.hits++
 	if p.fail {
 		return nil, errors.New("simulated error from peer")
@@ -205,7 +205,7 @@ func (p *fakePeer) Get(_ context.Context, in *GetRequest) (*view.View, error) {
 	return rView, nil
 }
 
-func (p *fakePeer) Remove(_ context.Context, in *GetRequest) error {
+func (p *fakePeer) Remove(_ context.Context, in *Request) error {
 	p.hits++
 	if p.fail {
 		return errors.New("simulated error from peer")
@@ -217,9 +217,9 @@ func (p *fakePeer) GetURL() string {
 	return "fakePeer"
 }
 
-type fakePeers []ProtoGetter
+type fakePeers []HTTPGetter
 
-func (p fakePeers) PickPeer(key string) (peer ProtoGetter, ok bool) {
+func (p fakePeers) PickPeer(key string) (peer HTTPGetter, ok bool) {
 	if len(p) == 0 {
 		return
 	}
@@ -227,7 +227,7 @@ func (p fakePeers) PickPeer(key string) (peer ProtoGetter, ok bool) {
 	return p[n], p[n] != nil
 }
 
-func (p fakePeers) GetAll() []ProtoGetter {
+func (p fakePeers) GetAll() []HTTPGetter {
 	return p
 }
 
@@ -237,7 +237,7 @@ func TestPeers(t *testing.T) {
 	peer0 := &fakePeer{}
 	peer1 := &fakePeer{}
 	peer2 := &fakePeer{}
-	peerList := fakePeers([]ProtoGetter{peer0, peer1, peer2, nil})
+	peerList := fakePeers([]HTTPGetter{peer0, peer1, peer2, nil})
 	const cacheSize = 0 // disabled
 	localHits := 0
 	getter := func(ctx context.Context, key string) (*view.View, error) {
@@ -340,7 +340,7 @@ type slowPeer struct {
 	fakePeer
 }
 
-func (p *slowPeer) Get(_ context.Context, in *GetRequest) (*view.View, error) {
+func (p *slowPeer) Get(_ context.Context, in *Request) (*view.View, error) {
 	time.Sleep(time.Second)
 	data := []byte("got:" + in.Key)
 	return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), 0), nil
@@ -351,7 +351,7 @@ func TestContextDeadlineOnPeer(t *testing.T) {
 	peer0 := &slowPeer{}
 	peer1 := &slowPeer{}
 	peer2 := &slowPeer{}
-	peerList := fakePeers([]ProtoGetter{peer0, peer1, peer2, nil})
+	peerList := fakePeers([]HTTPGetter{peer0, peer1, peer2, nil})
 	getter := func(_ context.Context, key string) (*view.View, error) {
 		data := []byte("got:" + key)
 		return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), 0), nil

@@ -13,7 +13,7 @@ import (
 	"github.com/ipronko/groupcache/view"
 )
 
-func NewMemory(maxSize int64, opts Options) (*cache, error) {
+func NewMemory(maxSize int64, opts Options) (*memory, error) {
 	opts.Complete(maxSize)
 
 	rCache, err := getCache(maxSize, opts)
@@ -21,7 +21,7 @@ func NewMemory(maxSize int64, opts Options) (*cache, error) {
 		return nil, err
 	}
 
-	c := &cache{
+	c := &memory{
 		maxInstanceSize: opts.MaxInstanceSize,
 		cache:           rCache,
 		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
@@ -66,7 +66,7 @@ func (o *Options) Complete(maxSize int64) {
 type StoreType int
 
 // cache is a wrapper around an *ristretto.Cache
-type cache struct {
+type memory struct {
 	bufPool         *bpool.BytePool
 	maxInstanceSize int64
 	lilFile         int64
@@ -74,7 +74,7 @@ type cache struct {
 	cache           *ristretto.Cache
 }
 
-func (c *cache) Stats() CacheStats {
+func (c *memory) Stats() CacheStats {
 	return CacheStats{
 		Bytes:     c.cache.Metrics.CostAdded() - c.cache.Metrics.CostEvicted(),
 		Items:     c.cache.Metrics.KeysAdded() - c.cache.Metrics.KeysEvicted(),
@@ -84,7 +84,7 @@ func (c *cache) Stats() CacheStats {
 	}
 }
 
-func (c *cache) Add(key string, value *view.View) error {
+func (c *memory) Add(key string, value *view.View) error {
 	if value.Len() > c.maxInstanceSize {
 		return nil
 	}
@@ -100,9 +100,39 @@ func (c *cache) Add(key string, value *view.View) error {
 	return c.set(key, value)
 }
 
-func (c *cache) set(key string, value *view.View) error {
+func (c *memory) AddForce(key string, value *view.View) error {
+	defer value.Close()
+
+	if value.Len() > c.maxInstanceSize {
+		return nil
+	}
+
+	if buf, ok := value.BytesBuffer(); ok {
+		c.setValue(key, byteValue{
+			ttl:  value.Expire(),
+			data: buf.Bytes(),
+		}, int64(buf.Len()), value.Expire(), true)
+		return nil
+	}
+
+	_, err := c.readAndSet(key, value, value.Expire(), true)
+	return err
+}
+
+func (c *memory) setValue(key string, val byteValue, len int64, expire time.Duration, force bool) {
+	for i := 0; i < 1000; i++ {
+		if c.cache.SetWithTTL(key, val, len, expire) {
+			return
+		}
+		if !force {
+			return
+		}
+	}
+}
+
+func (c *memory) set(key string, value *view.View) error {
 	if value.Len() <= c.lilFile {
-		buff, err := c.readAndSet(key, value, value.Expire())
+		buff, err := c.readAndSet(key, value, value.Expire(), false)
 		if err != nil {
 			return err
 		}
@@ -123,7 +153,7 @@ func (c *cache) set(key string, value *view.View) error {
 			}
 		}()
 
-		_, err := c.readAndSet(key, ioutil.NopCloser(teeReader), value.Expire())
+		_, err := c.readAndSet(key, ioutil.NopCloser(teeReader), value.Expire(), false)
 		if err != nil {
 			c.logger.Errorf("read and set err: %s", err.Error())
 			return
@@ -132,7 +162,7 @@ func (c *cache) set(key string, value *view.View) error {
 	return nil
 }
 
-func (c *cache) readAndSet(key string, r io.Reader, expire time.Duration) (*bytes.Buffer, error) {
+func (c *memory) readAndSet(key string, r io.Reader, expire time.Duration, force bool) (*bytes.Buffer, error) {
 	bullPool := c.bufPool.Get()
 	defer c.bufPool.Put(bullPool)
 
@@ -144,10 +174,12 @@ func (c *cache) readAndSet(key string, r io.Reader, expire time.Duration) (*byte
 		return nil, err
 	}
 
-	c.cache.SetWithTTL(key, byteValue{
+	val := byteValue{
 		ttl:  expire,
 		data: buff.Bytes(),
-	}, wrote, expire)
+	}
+
+	c.setValue(key, val, wrote, expire, force)
 
 	return buff, nil
 }
@@ -157,7 +189,7 @@ type byteValue struct {
 	data []byte
 }
 
-func (c *cache) Get(key string) (*view.View, bool) {
+func (c *memory) Get(key string) (*view.View, bool) {
 	vi, ok := c.cache.Get(key)
 	if !ok {
 		return nil, false
@@ -172,6 +204,6 @@ func (c *cache) Get(key string) (*view.View, bool) {
 	return view.NewView(bytes.NewBuffer(val.data), int64(len(val.data)), val.ttl), true
 }
 
-func (c *cache) Remove(key string) {
+func (c *memory) Remove(key string) {
 	c.cache.Del(key)
 }

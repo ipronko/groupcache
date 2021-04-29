@@ -9,6 +9,7 @@ import (
 
 type ViewCache interface {
 	Add(key string, value *view.View) error
+	AddForce(key string, value *view.View) error
 	Get(key string) (v *view.View, ok bool)
 	Remove(key string)
 	Stats() CacheStats

@@ -194,12 +194,12 @@ func (p *HTTPPool) Set(peers ...string) {
 }
 
 // GetAll returns all the peers in the pool
-func (p *HTTPPool) GetAll() []ProtoGetter {
+func (p *HTTPPool) GetAll() []HTTPGetter {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	var i int
-	res := make([]ProtoGetter, len(p.httpGetters))
+	res := make([]HTTPGetter, len(p.httpGetters))
 	for _, v := range p.httpGetters {
 		res[i] = v
 		i++
@@ -207,7 +207,7 @@ func (p *HTTPPool) GetAll() []ProtoGetter {
 	return res
 }
 
-func (p *HTTPPool) PickPeer(key string) (ProtoGetter, bool) {
+func (p *HTTPPool) PickPeer(key string) (HTTPGetter, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.peers.IsEmpty() {
@@ -255,6 +255,14 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx = r.Context()
 	}
 
+	if r.Method == http.MethodPost {
+		err := group.WarmUp(ctx, key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
 	group.Stats.ServerRequests.Add(1)
 
 	// Delete the key and return 200
@@ -290,7 +298,7 @@ var bufferPool = sync.Pool{
 	New: func() interface{} { return new(bytes.Buffer) },
 }
 
-func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequest, out *http.Response) error {
+func (h *httpGetter) makeRequest(ctx context.Context, method string, in *Request, out *http.Response) error {
 	u := fmt.Sprintf(
 		"%v/%v/%v",
 		strings.TrimSuffix(h.baseURL, "/"),
@@ -322,7 +330,7 @@ func (h *httpGetter) makeRequest(ctx context.Context, method string, in *GetRequ
 	return nil
 }
 
-func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.View, error) {
+func (h *httpGetter) Get(ctx context.Context, in *Request) (*view.View, error) {
 	var res http.Response
 	if err := h.makeRequest(ctx, http.MethodGet, in, &res); err != nil {
 		return nil, err
@@ -347,7 +355,20 @@ func (h *httpGetter) Get(ctx context.Context, in *GetRequest) (*view.View, error
 	return view.NewView(res.Body, size, time.Duration(duration)), nil
 }
 
-func (h *httpGetter) Remove(ctx context.Context, in *GetRequest) error {
+func (h *httpGetter) WarmUp(ctx context.Context, in *Request) error {
+	var res http.Response
+	if err := h.makeRequest(ctx, http.MethodPost, in, &res); err != nil {
+		return err
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned: %v", res.Status)
+	}
+
+	return nil
+}
+
+func (h *httpGetter) Remove(ctx context.Context, in *Request) error {
 	var res http.Response
 	if err := h.makeRequest(ctx, http.MethodDelete, in, &res); err != nil {
 		return err

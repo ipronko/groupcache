@@ -189,7 +189,7 @@ func newGroup(name string, getter Getter, peers PeerPicker, main, hot cache.View
 		mainCache:   main,
 		peers:       peers,
 		hotCache:    hot,
-		lastGroup:   lastInGroup,
+		lastInChain: lastInGroup,
 		loadGroup:   &singleflight.Group{},
 		removeGroup: &singleflight.Group{},
 	}
@@ -234,11 +234,11 @@ func callInitPeerServer() {
 // A Group is a cache namespace and associated data loaded spread over
 // a group of 1 or more machines.
 type Group struct {
-	name      string
-	getter    Getter
-	peersOnce sync.Once
-	peers     PeerPicker
-	lastGroup bool
+	name        string
+	getter      Getter
+	peersOnce   sync.Once
+	peers       PeerPicker
+	lastInChain bool
 
 	// mainCache is a cache of the keys for which this process
 	// (amongst its peers) is authoritative. That is, this cache
@@ -320,6 +320,24 @@ func (g *Group) Get(ctx context.Context, key string) (*view.View, error) {
 	return g.load(ctx, key)
 }
 
+func (g *Group) WarmUp(ctx context.Context, key string) error {
+	g.peersOnce.Do(g.initPeers)
+
+	if g.inCache(key) {
+		return nil
+	}
+
+	return g.warmUp(ctx, key)
+}
+
+func (g *Group) inCache(key string) bool {
+	v, cacheHit := g.lookupCache(key)
+	if cacheHit {
+		v.Close()
+	}
+	return cacheHit
+}
+
 // Remove clears the key from our cache then forwards the remove
 // request to all peers.
 func (g *Group) Remove(ctx context.Context, key string) error {
@@ -347,7 +365,7 @@ func (g *Group) Remove(ctx context.Context, key string) error {
 			}
 
 			wg.Add(1)
-			go func(peer ProtoGetter) {
+			go func(peer HTTPGetter) {
 				errs <- g.removeFromPeer(ctx, peer, key)
 				wg.Done()
 			}(peer)
@@ -369,13 +387,32 @@ func (g *Group) Remove(ctx context.Context, key string) error {
 	return err
 }
 
+func (g *Group) warmUp(ctx context.Context, key string) error {
+	if peer, ok := g.peers.PickPeer(key); ok && g.lastInChain {
+		err := g.warmUpPeer(ctx, peer, key)
+		if err == nil {
+			return nil
+		}
+
+		if logger != nil {
+			logger.WithFields(logrus.Fields{
+				"err":      err,
+				"key":      key,
+				"category": "groupcache",
+			}).Errorf("error warm up key in peer '%s'", peer.GetURL())
+		}
+	}
+
+	return g.warmUpLocally(ctx, key)
+}
+
 // load loads key either by invoking the getter locally or by sending it to another machine.
 func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 	g.Stats.Loads.Add(1)
 
 	var value *view.View
 	var err error
-	if peer, ok := g.peers.PickPeer(key); ok && g.lastGroup {
+	if peer, ok := g.peers.PickPeer(key); ok && g.lastInChain {
 
 		// metrics duration start
 		start := time.Now()
@@ -384,7 +421,7 @@ func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 		value, err = g.getFromPeer(ctx, peer, key)
 
 		// metrics duration compute
-		duration := int64(time.Since(start)) / int64(time.Millisecond)
+		duration := int64(time.Since(start).Round(time.Millisecond))
 
 		// metrics only store the slowest duration
 		if g.Stats.GetFromPeersLatencyLower.Get() < duration {
@@ -405,7 +442,6 @@ func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 		}
 
 		g.Stats.PeerErrors.Add(1)
-		//return nil, err
 	}
 
 	value, err = g.getLocally(ctx, key)
@@ -428,8 +464,30 @@ func (g *Group) getLocally(ctx context.Context, key string) (*view.View, error) 
 	return v, err
 }
 
-func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string) (*view.View, error) {
-	req := &GetRequest{
+type warmUp interface {
+	WarmUp(ctx context.Context, key string) error
+}
+
+func (g *Group) warmUpLocally(ctx context.Context, key string) error {
+	if !g.lastInChain {
+		wu, ok := g.getter.(warmUp)
+		if !ok {
+			return fmt.Errorf("next getter is not implement warm up interface")
+		}
+		return wu.WarmUp(ctx, key)
+	}
+
+	v, err := g.getter.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+
+	return g.mainCache.AddForce(key, v)
+}
+
+func (g *Group) getFromPeer(ctx context.Context, peer HTTPGetter, key string) (*view.View, error) {
+	req := &Request{
 		Group: g.name,
 		Key:   key,
 	}
@@ -439,12 +497,23 @@ func (g *Group) getFromPeer(ctx context.Context, peer ProtoGetter, key string) (
 		return v, err
 	}
 
-	err = g.hotCache.Add(key, v)
+	if g.hotCache != nil {
+		err = g.hotCache.Add(key, v)
+	}
+
 	return v, err
 }
 
-func (g *Group) removeFromPeer(ctx context.Context, peer ProtoGetter, key string) error {
-	req := &GetRequest{
+func (g *Group) warmUpPeer(ctx context.Context, peer HTTPGetter, key string) error {
+	req := &Request{
+		Group: g.name,
+		Key:   key,
+	}
+	return peer.WarmUp(ctx, req)
+}
+
+func (g *Group) removeFromPeer(ctx context.Context, peer HTTPGetter, key string) error {
+	req := &Request{
 		Group: g.name,
 		Key:   key,
 	}
