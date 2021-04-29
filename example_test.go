@@ -59,7 +59,7 @@ func Test_ExampleUsage(t *testing.T) {
 			f := openFile()
 			return view.NewView(f, size, expTime), nil
 		},
-	), true, cache.Options{})
+	), cache.Options{})
 	if err != nil {
 		t.Errorf("create new group")
 	}

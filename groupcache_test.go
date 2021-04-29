@@ -66,7 +66,7 @@ func testSetup() {
 		cacheFills.Add(1)
 		buf := bytes.NewBuffer([]byte("ECHO:" + key))
 		return view.NewView(ioutil.NopCloser(buf), int64(buf.Len()), 0), nil
-	}), true, cache.Options{})
+	}), cache.Options{})
 	if err != nil {
 		panic(err)
 	}
@@ -80,7 +80,7 @@ func testSetup() {
 		cacheFills.Add(1)
 		buf := bytes.NewBuffer([]byte("ECHO:" + key))
 		return view.NewView(ioutil.NopCloser(buf), int64(buf.Len()), time.Millisecond*100), nil
-	}), true, cache.FileOptions{
+	}), cache.FileOptions{
 		Options:        cache.Options{},
 		SkipFirstCalls: &skipFirst,
 		RootPath:       dir,
@@ -213,6 +213,10 @@ func (p *fakePeer) Remove(_ context.Context, in *Request) error {
 	return nil
 }
 
+func (p *fakePeer) WarmUp(context context.Context, in *Request) error {
+	return nil
+}
+
 func (p *fakePeer) GetURL() string {
 	return "fakePeer"
 }
@@ -247,7 +251,7 @@ func TestPeers(t *testing.T) {
 		return view.NewView(rc, int64(buf.Len()), 0), nil
 	}
 
-	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil, true)
+	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil, true, true)
 	if err != nil {
 		panic(err)
 	}
@@ -325,7 +329,7 @@ func TestPeers(t *testing.T) {
 	peerList[0] = peer0
 	peer0.fail = true
 	failMode = true
-	run("peer0_failing", 200, "localHits = 49, peers = 51 49 51")
+	run("peer0_failing", 200, "localHits = 100, peers = 51 49 51")
 }
 
 func TestGroupStatsAlignment(t *testing.T) {
@@ -361,7 +365,7 @@ func TestContextDeadlineOnPeer(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	testGroup, err := newGroup("TestContextDeadlineOnPeer-group", GetterFunc(getter), peerList, cache, cache, true)
+	testGroup, err := newGroup("TestContextDeadlineOnPeer-group", GetterFunc(getter), peerList, cache, cache, true, true)
 	if err != nil {
 		panic(err)
 	}
