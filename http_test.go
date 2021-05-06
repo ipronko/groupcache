@@ -211,7 +211,7 @@ func beChildForTestHTTPPool(t *testing.T) {
 
 		buffer := bytes.NewBuffer(nil)
 		buffer.Write([]byte(strconv.Itoa(*peerIndex) + ":" + key))
-		return view.NewView(ioutil.NopCloser(buffer), int64(buffer.Len()), 0), nil
+		return view.NewView(ioutil.NopCloser(buffer), 0), nil
 	})
 	_, err = NewMemory("httpPoolTest", 1<<20, getter, cache.Options{Logger: logrus.New()})
 	if err != nil {

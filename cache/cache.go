@@ -34,13 +34,11 @@ const (
 
 	defaultBuffer          = 32 * units.KiB
 	defaultBufferInstances = 256
-
-	defaultLittleFile = 100 * units.KiB
 )
 
 type nopLogger struct{}
 
-func (l nopLogger) Errorf(template string, args ...interface{}) {}
+func (l nopLogger) Errorf(_ string, _ ...interface{}) {}
 
 func getCache(maxSize int64, opts Options) (*ristretto.Cache, error) {
 	rCache := new(ristretto.Cache)

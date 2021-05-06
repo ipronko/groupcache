@@ -42,7 +42,7 @@ func Test_ExampleUsage(t *testing.T) {
 
 	file := openFile()
 
-	hash := getHash(file)
+	_, hash := getHash(file)
 	check(file.Close())
 	size := fileInfo().Size()
 	expTime := time.Minute
@@ -57,7 +57,7 @@ func Test_ExampleUsage(t *testing.T) {
 				t.Errorf("expected key %s, got %s", key, id)
 			}
 			f := openFile()
-			return view.NewView(f, size, expTime), nil
+			return view.NewView(f, expTime), nil
 		},
 	), cache.Options{})
 	if err != nil {
@@ -78,7 +78,7 @@ func Test_ExampleUsage(t *testing.T) {
 		}
 
 		check(err)
-		testHash := getHash(v)
+		n, testHash := getHash(v)
 		v.Close()
 
 		if hash != testHash {
@@ -86,8 +86,8 @@ func Test_ExampleUsage(t *testing.T) {
 			return
 		}
 
-		if v.Len() != size {
-			t.Errorf("not expected size %d", v.Len())
+		if n != size {
+			t.Errorf("not expected size %d", n)
 			return
 		}
 
@@ -128,13 +128,13 @@ func fileInfo() os.FileInfo {
 	return stat
 }
 
-func getHash(reader io.Reader) string {
+func getHash(reader io.Reader) (int64, string) {
 	hashWriter := sha1.New()
-	_, err := io.Copy(hashWriter, reader)
+	n, err := io.Copy(hashWriter, reader)
 	check(err)
 
 	sum := hashWriter.Sum(nil)
-	return hex.EncodeToString(sum)
+	return n, hex.EncodeToString(sum)
 }
 
 func check(err error) {

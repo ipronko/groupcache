@@ -41,7 +41,6 @@ const defaultBasePath = "/_groupcache/"
 const defaultReplicas = 50
 
 const (
-	sizeHeader   = "X-Size"
 	expireHeader = "X-Expire"
 )
 
@@ -278,7 +277,6 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer v.Close()
 
-	w.Header().Set(sizeHeader, fmt.Sprintf("%d", v.Len()))
 	w.Header().Set(expireHeader, fmt.Sprintf("%d", v.Expire()))
 
 	io.Copy(w, v)
@@ -340,19 +338,13 @@ func (h *httpGetter) Get(ctx context.Context, in *Request) (*view.View, error) {
 		return nil, fmt.Errorf("server returned: %v", res.Status)
 	}
 
-	sizeStr := res.Header.Get(sizeHeader)
-	size, err := strconv.ParseInt(sizeStr, 10, 64)
-	if err != nil {
-		return nil, err
-	}
-
 	durStr := res.Header.Get(expireHeader)
 	duration, err := strconv.ParseInt(durStr, 10, 64)
 	if err != nil {
 		return nil, err
 	}
 
-	return view.NewView(res.Body, size, time.Duration(duration)), nil
+	return view.NewView(res.Body, time.Duration(duration)), nil
 }
 
 func (h *httpGetter) WarmUp(ctx context.Context, in *Request) error {

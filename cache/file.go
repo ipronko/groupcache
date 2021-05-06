@@ -112,9 +112,10 @@ func (c *file) restoreFiles() {
 }
 
 func (c *file) Add(key string, value *view.View) error {
-	if value.Len() > c.maxInstanceSize {
-		return nil
-	}
+	//TODO ignore, limit while write
+	//if value.Len() > c.maxInstanceSize {
+	//	return nil
+	//}
 
 	if !c.popularFiles.IsPopular(key) {
 		return nil
@@ -126,11 +127,12 @@ func (c *file) Add(key string, value *view.View) error {
 func (c *file) AddForce(key string, value *view.View) error {
 	defer value.Close()
 
-	if value.Len() > c.maxInstanceSize {
-		return nil
-	}
+	//TODO limit max instance size while write to file
+	//if value.Len() > c.maxInstanceSize {
+	//	return nil
+	//}
 
-	return c.readAndSet(key, value, value.Len(), value.Expire(), true)
+	return c.readAndSet(key, value, value.Expire(), true)
 }
 
 func (c *file) set(key string, value *view.View) error {
@@ -148,7 +150,7 @@ func (c *file) set(key string, value *view.View) error {
 			}
 		}()
 
-		err := c.readAndSet(key, teeReader, value.Len(), value.Expire(), false)
+		err := c.readAndSet(key, teeReader, value.Expire(), false)
 		if err != nil {
 			c.logger.Errorf("key: %s, readAndSet value err: %s", err.Error())
 		}
@@ -157,10 +159,11 @@ func (c *file) set(key string, value *view.View) error {
 	return nil
 }
 
-func (c *file) readAndSet(key string, r io.Reader, len int64, expire time.Duration, force bool) error {
+func (c *file) readAndSet(key string, r io.Reader, expire time.Duration, force bool) error {
 	bullPool := c.bufPool.Get()
 	defer c.bufPool.Put(bullPool)
 
+	//TODO do not repeat writes of same file
 	tmpFile, err := c.fileResolver.tmpFile(key)
 	if err != nil {
 		return fmt.Errorf("create temp file err: %w", err)
@@ -170,12 +173,13 @@ func (c *file) readAndSet(key string, r io.Reader, len int64, expire time.Durati
 		os.Remove(tmpFile.Name())
 	}()
 
+	//TODO how to copy not more than maxInstanceSize?
 	wrote, err := io.CopyBuffer(tmpFile, r, bullPool)
 	if err != nil {
 		return fmt.Errorf("copy from reader to bytes buffer err: %w", err)
 	}
 
-	file := c.fileResolver.newFile(key, len, expire)
+	file := c.fileResolver.newFile(key, wrote, expire)
 
 	err = c.fileResolver.moveToFiles(tmpFile.Name(), file.filePath)
 	if err != nil {
@@ -325,7 +329,7 @@ func (f fileValue) readerView() (*view.View, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s file err: %w", f.filePath, err)
 	}
-	return view.NewView(open, f.size, f.ttl), nil
+	return view.NewView(open, f.ttl), nil
 }
 
 func (f fileValue) delete() error {

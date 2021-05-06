@@ -6,18 +6,16 @@ import (
 	"time"
 )
 
-func NewView(r io.Reader, size int64, ttl time.Duration) *View {
+func NewView(r io.Reader, ttl time.Duration) *View {
 	return &View{
-		r:    r,
-		size: size,
-		ttl:  ttl,
+		r:   r,
+		ttl: ttl,
 	}
 }
 
 type View struct {
-	r    io.Reader
-	size int64
-	ttl  time.Duration
+	r   io.Reader
+	ttl time.Duration
 }
 
 func (f *View) Read(b []byte) (int, error) {
@@ -33,10 +31,6 @@ func (f *View) Close() error {
 
 func (f *View) Expire() time.Duration {
 	return f.ttl
-}
-
-func (f *View) Len() int64 {
-	return f.size
 }
 
 func (f *View) SwapReader(r io.Reader) io.Reader {

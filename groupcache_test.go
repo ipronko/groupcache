@@ -57,6 +57,10 @@ const (
 	cacheSize       = 1 << 20
 )
 
+func fileSizeByKey(key string) int64 {
+	return int64(len([]byte("ECHO:" + key)))
+}
+
 func testSetup() {
 	var err error
 	memoryGroup, err = NewMemory(stringGroupName, cacheSize, GetterFunc(func(_ context.Context, key string) (*view.View, error) {
@@ -65,7 +69,7 @@ func testSetup() {
 		}
 		cacheFills.Add(1)
 		buf := bytes.NewBuffer([]byte("ECHO:" + key))
-		return view.NewView(ioutil.NopCloser(buf), int64(buf.Len()), 0), nil
+		return view.NewView(ioutil.NopCloser(buf), 0), nil
 	}), cache.Options{})
 	if err != nil {
 		panic(err)
@@ -79,7 +83,7 @@ func testSetup() {
 	fileGroup, err = NewFile(fileGroupName, cacheSize, GetterFunc(func(_ context.Context, key string) (*view.View, error) {
 		cacheFills.Add(1)
 		buf := bytes.NewBuffer([]byte("ECHO:" + key))
-		return view.NewView(ioutil.NopCloser(buf), int64(buf.Len()), time.Millisecond*100), nil
+		return view.NewView(ioutil.NopCloser(buf), time.Millisecond*100), nil
 	}), cache.FileOptions{
 		Options:        cache.Options{},
 		SkipFirstCalls: &skipFirst,
@@ -104,9 +108,11 @@ func TestCaching(t *testing.T) {
 			if i == 1 {
 				time.Sleep(time.Millisecond * 10)
 			}
-			if _, err := memoryGroup.Get(dummyCtx, "TestCaching-key"); err != nil {
+			v, err := memoryGroup.Get(dummyCtx, "TestCaching-key")
+			if err != nil {
 				t.Fatal(err)
 			}
+			io.Copy(ioutil.Discard, v)
 		}
 	})
 	if fills != 1 {
@@ -129,8 +135,8 @@ func TestCachingExpire(t *testing.T) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			if n != v.Len() {
-				t.Fatalf("copied %d bytes, must be %d", n, v.Len())
+			if n != fileSizeByKey("TestCachingExpire-key") {
+				t.Fatalf("copied %d bytes, must be %d", n, fileSizeByKey("TestCachingExpire-key"))
 			}
 
 		}
@@ -173,7 +179,8 @@ func _TestCacheEviction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bytesFlooded += v.Len()
+		io.Copy(ioutil.Discard, v)
+		bytesFlooded += fileSizeByKey(key)
 	}
 	time.Sleep(10 * time.Millisecond)
 	evicts := g.mainCache.Stats().Evictions - evict0
@@ -201,7 +208,7 @@ func (p *fakePeer) Get(_ context.Context, in *Request) (*view.View, error) {
 	}
 	buf := bytes.NewBuffer([]byte("got:" + in.Key))
 	rc := ioutil.NopCloser(buf)
-	rView := view.NewView(rc, int64(buf.Len()), 0)
+	rView := view.NewView(rc, 0)
 	return rView, nil
 }
 
@@ -248,7 +255,7 @@ func TestPeers(t *testing.T) {
 		localHits++
 		buf := bytes.NewBuffer([]byte("got:" + key))
 		rc := ioutil.NopCloser(buf)
-		return view.NewView(rc, int64(buf.Len()), 0), nil
+		return view.NewView(rc, 0), nil
 	}
 
 	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil, true, true)
@@ -347,7 +354,7 @@ type slowPeer struct {
 func (p *slowPeer) Get(_ context.Context, in *Request) (*view.View, error) {
 	time.Sleep(time.Second)
 	data := []byte("got:" + in.Key)
-	return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), 0), nil
+	return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), 0), nil
 }
 
 func TestContextDeadlineOnPeer(t *testing.T) {
@@ -358,7 +365,7 @@ func TestContextDeadlineOnPeer(t *testing.T) {
 	peerList := fakePeers([]HTTPGetter{peer0, peer1, peer2, nil})
 	getter := func(_ context.Context, key string) (*view.View, error) {
 		data := []byte("got:" + key)
-		return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), int64(len(data)), 0), nil
+		return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), 0), nil
 	}
 
 	cache, err := cache.NewMemory(1024*1024, cache.Options{})

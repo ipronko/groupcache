@@ -26,7 +26,6 @@ func NewMemory(maxSize int64, opts Options) (*memory, error) {
 		cache:           rCache,
 		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
 		logger:          opts.Logger,
-		lilFile:         opts.LittleFile,
 	}
 
 	return c, nil
@@ -39,7 +38,6 @@ type Options struct {
 	Logger              Logger
 	CopyBufferSize      int
 	CopyBufferWidth     int
-	LittleFile          int64
 }
 
 func (o *Options) Complete(maxSize int64) {
@@ -58,9 +56,6 @@ func (o *Options) Complete(maxSize int64) {
 	if o.CopyBufferWidth == 0 {
 		o.CopyBufferWidth = int(defaultBuffer)
 	}
-	if o.LittleFile == 0 {
-		o.LittleFile = int64(defaultLittleFile)
-	}
 }
 
 type StoreType int
@@ -69,7 +64,6 @@ type StoreType int
 type memory struct {
 	bufPool         *bpool.BytePool
 	maxInstanceSize int64
-	lilFile         int64
 	logger          Logger
 	cache           *ristretto.Cache
 }
@@ -85,9 +79,10 @@ func (c *memory) Stats() CacheStats {
 }
 
 func (c *memory) Add(key string, value *view.View) error {
-	if value.Len() > c.maxInstanceSize {
-		return nil
-	}
+	//TODO ignore, use https://github.com/djherbis/buffer buffer.NewSpill
+	//if value.Len() > c.maxInstanceSize {
+	//	return nil
+	//}
 
 	if buf, ok := value.BytesBuffer(); ok {
 		c.cache.SetWithTTL(key, byteValue{
@@ -103,9 +98,10 @@ func (c *memory) Add(key string, value *view.View) error {
 func (c *memory) AddForce(key string, value *view.View) error {
 	defer value.Close()
 
-	if value.Len() > c.maxInstanceSize {
-		return nil
-	}
+	//TODO ignore, use https://github.com/djherbis/buffer buffer.NewSpill
+	//if value.Len() > c.maxInstanceSize {
+	//	return nil
+	//}
 
 	if buf, ok := value.BytesBuffer(); ok {
 		c.setValue(key, byteValue{
@@ -131,16 +127,6 @@ func (c *memory) setValue(key string, val byteValue, len int64, expire time.Dura
 }
 
 func (c *memory) set(key string, value *view.View) error {
-	if value.Len() <= c.lilFile {
-		buff, err := c.readAndSet(key, value, value.Expire(), false)
-		if err != nil {
-			return err
-		}
-		value.Close()
-		value.SwapReader(buff)
-		return nil
-	}
-
 	pipeR, pipeW := io.Pipe()
 	oldReader := value.SwapReader(pipeR)
 	teeReader := io.TeeReader(oldReader, pipeW)
@@ -167,6 +153,8 @@ func (c *memory) readAndSet(key string, r io.Reader, expire time.Duration, force
 	defer c.bufPool.Put(bullPool)
 
 	buff := bytes.NewBuffer(nil)
+
+	//TODO discard if increase max file limit. https://github.com/djherbis/buffer buffer.NewSpill can be used
 	wrote, err := io.CopyBuffer(buff, r, bullPool)
 	if err != nil {
 		err = fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
@@ -201,7 +189,7 @@ func (c *memory) Get(key string) (*view.View, bool) {
 		return nil, false
 	}
 
-	return view.NewView(bytes.NewBuffer(val.data), int64(len(val.data)), val.ttl), true
+	return view.NewView(bytes.NewBuffer(val.data), val.ttl), true
 }
 
 func (c *memory) Remove(key string) {
