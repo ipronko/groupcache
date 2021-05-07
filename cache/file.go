@@ -5,12 +5,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/dgraph-io/ristretto"
+	"github.com/djherbis/fscache"
 	"github.com/oxtoacart/bpool"
 
 	"github.com/ipronko/groupcache/popular"
@@ -49,12 +49,11 @@ func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 	c := &file{
 		maxInstanceSize: opts.MaxInstanceSize,
 		cache:           rCache,
-		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
 		logger:          opts.Logger,
 		popularFiles:    popular.New(*opts.SkipFirstCalls, time.Hour*24*30),
 	}
 
-	fr, err := newFileResolver(opts.RootPath)
+	fr, err := newFileResolver(opts.RootPath, opts.CopyBufferSize, opts.CopyBufferWidth)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +77,6 @@ func onEvict(value interface{}, logger Logger) {
 
 // file is a wrapper around an *ristretto.Cache
 type file struct {
-	bufPool         *bpool.BytePool
 	maxInstanceSize int64
 	logger          Logger
 	cache           *ristretto.Cache
@@ -112,94 +110,61 @@ func (c *file) restoreFiles() {
 }
 
 func (c *file) Add(key string, value *view.View) error {
-	//TODO ignore, limit while write
-	//if value.Len() > c.maxInstanceSize {
-	//	return nil
-	//}
-
 	if !c.popularFiles.IsPopular(key) {
 		return nil
 	}
 
-	return c.set(key, value)
+	return c.set(key, value, false)
 }
 
 func (c *file) AddForce(key string, value *view.View) error {
-	defer value.Close()
-
-	//TODO limit max instance size while write to file
-	//if value.Len() > c.maxInstanceSize {
-	//	return nil
-	//}
-
-	return c.readAndSet(key, value, value.Expire(), true)
+	return c.set(key, value, true)
 }
 
-func (c *file) set(key string, value *view.View) error {
-	//What if value is buffer?
-	pipeR, pipeW := io.Pipe()
+func (c *file) set(key string, value *view.View, force bool) error {
+	reader, writer, err := c.fileResolver.createTemp(key)
+	if err != nil {
+		c.logger.Errorf("skip creating tmp file, err: %w", err)
+		return nil
+	}
 
-	oldReader := value.SwapReader(pipeR)
+	oldReader := value.SwapReader(reader)
+	if writer == nil {
+		if rc, ok := oldReader.(io.ReadCloser); ok {
+			rc.Close()
+		}
+		return nil
+	}
 
-	teeReader := io.TeeReader(oldReader, pipeW)
 	go func() {
 		defer func() {
-			pipeW.Close()
 			if rc, ok := oldReader.(io.ReadCloser); ok {
 				rc.Close()
 			}
 		}()
 
-		err := c.readAndSet(key, teeReader, value.Expire(), false)
+		file, err := c.fileResolver.overTemp(key, oldReader, writer)
 		if err != nil {
-			c.logger.Errorf("key: %s, readAndSet value err: %s", err.Error())
+			c.logger.Errorf("write to tmp file err: %w", err)
+			return
+		}
+
+		ok := c.setValue(key, file, file.size, force)
+		if !ok {
+			err := c.fileResolver.delete(key)
+			if err != nil {
+				c.logger.Errorf("copy from reader to bytes buffer err: %w", err)
+				return
+			}
 		}
 	}()
 
 	return nil
 }
 
-func (c *file) readAndSet(key string, r io.Reader, expire time.Duration, force bool) error {
-	bullPool := c.bufPool.Get()
-	defer c.bufPool.Put(bullPool)
-
-	//TODO do not repeat writes of same file
-	tmpFile, err := c.fileResolver.tmpFile(key)
-	if err != nil {
-		return fmt.Errorf("create temp file err: %w", err)
-	}
-	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
-	}()
-
-	//TODO how to copy not more than maxInstanceSize?
-	wrote, err := io.CopyBuffer(tmpFile, r, bullPool)
-	if err != nil {
-		return fmt.Errorf("copy from reader to bytes buffer err: %w", err)
-	}
-
-	file := c.fileResolver.newFile(key, wrote, expire)
-
-	err = c.fileResolver.moveToFiles(tmpFile.Name(), file.filePath)
-	if err != nil {
-		return fmt.Errorf("move tmp file to files err: %w", err)
-	}
-
-	ok := c.setValue(key, file, wrote, expire, force)
-	if !ok {
-		err := c.fileResolver.delete(key)
-		if err != nil {
-			return fmt.Errorf("copy from reader to bytes buffer err: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (c *file) setValue(key string, val fileValue, len int64, expire time.Duration, force bool) bool {
+func (c *file) setValue(key string, val fileValue, len int64, force bool) bool {
 	for i := 0; i < 1000; i++ {
-		if c.cache.SetWithTTL(key, val, len, expire) {
+		if c.cache.Set(key, val, len) {
 			return true
 		}
 		if !force {
@@ -209,10 +174,14 @@ func (c *file) setValue(key string, val fileValue, len int64, expire time.Durati
 	return false
 }
 
-func (c *file) Get(key string) (v *view.View, ok bool) {
+func (c *file) Get(key string) (*view.View, bool) {
 	vi, ok := c.cache.Get(key)
 	if !ok {
-		return
+		rc, ok := c.fileResolver.exists(key)
+		if ok {
+			return view.NewView(rc), ok
+		}
+		return nil, ok
 	}
 
 	f, ok := vi.(fileValue)
@@ -241,7 +210,7 @@ const (
 	filePath = "file"
 )
 
-func newFileResolver(rootDir string) (*fileResolver, error) {
+func newFileResolver(rootDir string, copyBufferSize, copyBufferWidth int) (*fileResolver, error) {
 	tmpRoot := filepath.Join(rootDir, tempPath)
 	fileRoot := filepath.Join(rootDir, filePath)
 
@@ -252,15 +221,38 @@ func newFileResolver(rootDir string) (*fileResolver, error) {
 		return nil, fmt.Errorf("create dirs for files")
 	}
 
+	tmpCache, err := fscache.New(tmpRoot, 0600, 0)
+	if err != nil {
+		return nil, fmt.Errorf("create tmp fscache err: %w", err)
+	}
+
 	return &fileResolver{
-		tmpRoot:  tmpRoot,
+		buffPool: bpool.NewBytePool(copyBufferSize, copyBufferWidth),
+		tmpCache: tmpCache,
 		fileRoot: fileRoot,
 	}, nil
 }
 
 type fileResolver struct {
-	tmpRoot  string
+	tmpCache fscache.Cache
 	fileRoot string
+	buffPool *bpool.BytePool
+}
+
+func (f *fileResolver) exists(key string) (io.ReadCloser, bool) {
+	rc, writer, err := f.tmpCache.Get(key)
+	if err != nil {
+		return nil, false
+	}
+
+	if writer != nil {
+		writer.Close()
+		rc.Close()
+		f.tmpCache.Remove(key)
+		return nil, false
+	}
+
+	return rc, true
 }
 
 func (f *fileResolver) walk(fileCh chan<- fileValue) error {
@@ -278,7 +270,6 @@ func (f *fileResolver) walk(fileCh chan<- fileValue) error {
 		fileCh <- fileValue{
 			filePath: path,
 			size:     info.Size(),
-			ttl:      0,
 		}
 		return nil
 	})
@@ -293,16 +284,45 @@ func (f *fileResolver) delete(key string) error {
 	return nil
 }
 
-func (f *fileResolver) newFile(key string, size int64, ttl time.Duration) fileValue {
+func (f *fileResolver) newFile(key string, size int64) fileValue {
 	return fileValue{
 		filePath: filepath.Join(f.fileRoot, getFilePath(key)),
 		size:     size,
-		ttl:      ttl,
 	}
 }
 
-func (f *fileResolver) tmpFile(key string) (*os.File, error) {
-	return ioutil.TempFile(f.tmpRoot, key)
+func (f *fileResolver) createTemp(key string) (fscache.ReadAtCloser, io.WriteCloser, error) {
+	return f.tmpCache.Get(key)
+}
+
+func (f *fileResolver) overTemp(key string, r io.Reader, w io.WriteCloser) (fileValue, error) {
+	bullPool := f.buffPool.Get()
+	defer func() {
+		f.buffPool.Put(bullPool)
+		w.Close()
+		f.tmpCache.Remove(key)
+
+	}()
+
+	wrote, err := io.CopyBuffer(w, r, bullPool)
+	if err != nil {
+		return fileValue{}, fmt.Errorf("copy from reader to bytes buffer err: %w", err)
+	}
+
+	file := f.newFile(key, wrote)
+
+	nameGetter, ok := w.(interface{ Name() string })
+	if !ok {
+		return file, fmt.Errorf("cant resolve tmp file name, key: %s", key)
+	}
+
+	err = f.moveToFiles(nameGetter.Name(), file.filePath)
+	if err != nil {
+
+		return file, fmt.Errorf("move tmp file to files err: %w", err)
+	}
+
+	return file, nil
 }
 
 func (f *fileResolver) moveToFiles(from, to string) error {
@@ -321,7 +341,6 @@ func (f *fileResolver) moveToFiles(from, to string) error {
 type fileValue struct {
 	filePath string
 	size     int64
-	ttl      time.Duration
 }
 
 func (f fileValue) readerView() (*view.View, error) {
@@ -329,7 +348,7 @@ func (f fileValue) readerView() (*view.View, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s file err: %w", f.filePath, err)
 	}
-	return view.NewView(open, f.ttl), nil
+	return view.NewView(open), nil
 }
 
 func (f fileValue) delete() error {

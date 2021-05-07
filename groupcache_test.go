@@ -26,7 +26,6 @@ import (
 	"hash/crc32"
 	"io"
 	"io/ioutil"
-	"log"
 	"sync"
 	"testing"
 	"time"
@@ -68,8 +67,7 @@ func testSetup() {
 			key = <-stringc
 		}
 		cacheFills.Add(1)
-		buf := bytes.NewBuffer([]byte("ECHO:" + key))
-		return view.NewView(ioutil.NopCloser(buf), 0), nil
+		return view.NewView(bytes.NewBuffer([]byte("ECHO:" + key))), nil
 	}), cache.Options{})
 	if err != nil {
 		panic(err)
@@ -83,7 +81,7 @@ func testSetup() {
 	fileGroup, err = NewFile(fileGroupName, cacheSize, GetterFunc(func(_ context.Context, key string) (*view.View, error) {
 		cacheFills.Add(1)
 		buf := bytes.NewBuffer([]byte("ECHO:" + key))
-		return view.NewView(ioutil.NopCloser(buf), time.Millisecond*100), nil
+		return view.NewView(ioutil.NopCloser(buf)), nil
 	}), cache.FileOptions{
 		Options:        cache.Options{},
 		SkipFirstCalls: &skipFirst,
@@ -120,33 +118,6 @@ func TestCaching(t *testing.T) {
 	}
 }
 
-func TestCachingExpire(t *testing.T) {
-	once.Do(testSetup)
-	fills := countFills(func() {
-		for i := 0; i < 3; i++ {
-			if i == 1 {
-				time.Sleep(time.Millisecond * 150)
-			}
-			v, err := fileGroup.Get(dummyCtx, "TestCachingExpire-key")
-			if err != nil {
-				t.Fatal(err)
-			}
-			n, err := io.Copy(ioutil.Discard, v)
-			if err != nil {
-				log.Fatal(err)
-			}
-			if n != fileSizeByKey("TestCachingExpire-key") {
-				t.Fatalf("copied %d bytes, must be %d", n, fileSizeByKey("TestCachingExpire-key"))
-			}
-
-		}
-	})
-	if fills != 2 {
-		t.Errorf("expected 2 cache fill, got %d", fills)
-	}
-}
-
-// not stable
 func _TestCacheEviction(t *testing.T) {
 	once.Do(testSetup)
 	testKey := "TestCacheEviction-key"
@@ -208,7 +179,7 @@ func (p *fakePeer) Get(_ context.Context, in *Request) (*view.View, error) {
 	}
 	buf := bytes.NewBuffer([]byte("got:" + in.Key))
 	rc := ioutil.NopCloser(buf)
-	rView := view.NewView(rc, 0)
+	rView := view.NewView(rc)
 	return rView, nil
 }
 
@@ -255,7 +226,7 @@ func TestPeers(t *testing.T) {
 		localHits++
 		buf := bytes.NewBuffer([]byte("got:" + key))
 		rc := ioutil.NopCloser(buf)
-		return view.NewView(rc, 0), nil
+		return view.NewView(rc), nil
 	}
 
 	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil, true, true)
@@ -354,7 +325,7 @@ type slowPeer struct {
 func (p *slowPeer) Get(_ context.Context, in *Request) (*view.View, error) {
 	time.Sleep(time.Second)
 	data := []byte("got:" + in.Key)
-	return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), 0), nil
+	return view.NewView(bytes.NewBuffer(data)), nil
 }
 
 func TestContextDeadlineOnPeer(t *testing.T) {
@@ -365,7 +336,7 @@ func TestContextDeadlineOnPeer(t *testing.T) {
 	peerList := fakePeers([]HTTPGetter{peer0, peer1, peer2, nil})
 	getter := func(_ context.Context, key string) (*view.View, error) {
 		data := []byte("got:" + key)
-		return view.NewView(ioutil.NopCloser(bytes.NewBuffer(data)), 0), nil
+		return view.NewView(bytes.NewBuffer(data)), nil
 	}
 
 	cache, err := cache.NewMemory(1024*1024, cache.Options{})

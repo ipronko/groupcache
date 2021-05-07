@@ -3,19 +3,16 @@ package view
 import (
 	"bytes"
 	"io"
-	"time"
 )
 
-func NewView(r io.Reader, ttl time.Duration) *View {
+func NewView(r io.Reader) *View {
 	return &View{
-		r:   r,
-		ttl: ttl,
+		r: r,
 	}
 }
 
 type View struct {
-	r   io.Reader
-	ttl time.Duration
+	r io.Reader
 }
 
 func (f *View) Read(b []byte) (int, error) {
@@ -27,10 +24,6 @@ func (f *View) Close() error {
 		return rc.Close()
 	}
 	return nil
-}
-
-func (f *View) Expire() time.Duration {
-	return f.ttl
 }
 
 func (f *View) SwapReader(r io.Reader) io.Reader {

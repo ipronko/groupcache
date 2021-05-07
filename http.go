@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,10 +38,6 @@ import (
 const defaultBasePath = "/_groupcache/"
 
 const defaultReplicas = 50
-
-const (
-	expireHeader = "X-Expire"
-)
 
 var transport http.RoundTripper = &http.Transport{
 	Proxy: http.ProxyFromEnvironment,
@@ -277,8 +272,6 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer v.Close()
 
-	w.Header().Set(expireHeader, fmt.Sprintf("%d", v.Expire()))
-
 	io.Copy(w, v)
 }
 
@@ -338,13 +331,7 @@ func (h *httpGetter) Get(ctx context.Context, in *Request) (*view.View, error) {
 		return nil, fmt.Errorf("server returned: %v", res.Status)
 	}
 
-	durStr := res.Header.Get(expireHeader)
-	duration, err := strconv.ParseInt(durStr, 10, 64)
-	if err != nil {
-		return nil, err
-	}
-
-	return view.NewView(res.Body, time.Duration(duration)), nil
+	return view.NewView(res.Body), nil
 }
 
 func (h *httpGetter) WarmUp(ctx context.Context, in *Request) error {

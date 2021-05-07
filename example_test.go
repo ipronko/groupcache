@@ -45,7 +45,6 @@ func Test_ExampleUsage(t *testing.T) {
 	_, hash := getHash(file)
 	check(file.Close())
 	size := fileInfo().Size()
-	expTime := time.Minute
 	getCalls := int64(10)
 	cacheHits := int64(9)
 	key := "12345"
@@ -57,7 +56,7 @@ func Test_ExampleUsage(t *testing.T) {
 				t.Errorf("expected key %s, got %s", key, id)
 			}
 			f := openFile()
-			return view.NewView(f, expTime), nil
+			return view.NewView(f), nil
 		},
 	), cache.Options{})
 	if err != nil {
@@ -88,11 +87,6 @@ func Test_ExampleUsage(t *testing.T) {
 
 		if n != size {
 			t.Errorf("not expected size %d", n)
-			return
-		}
-
-		if v.Expire() != expTime {
-			t.Errorf("not expected expireTime %s", v.Expire().Round(time.Millisecond))
 			return
 		}
 	}

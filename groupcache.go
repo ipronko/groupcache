@@ -375,8 +375,6 @@ func (g *Group) Remove(ctx context.Context, key string) error {
 			close(errs)
 		}()
 
-		// TODO(thrawn01): Should we report all errors? Reporting context
-		//  cancelled error for each peer doesn't make much sense.
 		var err error
 		for e := range errs {
 			err = e
@@ -539,6 +537,9 @@ func (g *Group) localRemove(key string) {
 			g.hotCache.Remove(key)
 		}
 	})
+	if remover, ok := g.getter.(interface{ Remove(string) }); ok {
+		remover.Remove(key)
+	}
 }
 
 // CacheType represents a type of cache.

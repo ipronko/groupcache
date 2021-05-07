@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"time"
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/oxtoacart/bpool"
@@ -79,16 +78,8 @@ func (c *memory) Stats() CacheStats {
 }
 
 func (c *memory) Add(key string, value *view.View) error {
-	//TODO ignore, use https://github.com/djherbis/buffer buffer.NewSpill
-	//if value.Len() > c.maxInstanceSize {
-	//	return nil
-	//}
-
 	if buf, ok := value.BytesBuffer(); ok {
-		c.cache.SetWithTTL(key, byteValue{
-			ttl:  value.Expire(),
-			data: buf.Bytes(),
-		}, int64(buf.Len()), value.Expire())
+		c.cache.Set(key, byteValue{data: buf.Bytes()}, int64(buf.Len()))
 		return nil
 	}
 
@@ -98,26 +89,20 @@ func (c *memory) Add(key string, value *view.View) error {
 func (c *memory) AddForce(key string, value *view.View) error {
 	defer value.Close()
 
-	//TODO ignore, use https://github.com/djherbis/buffer buffer.NewSpill
-	//if value.Len() > c.maxInstanceSize {
-	//	return nil
-	//}
-
 	if buf, ok := value.BytesBuffer(); ok {
 		c.setValue(key, byteValue{
-			ttl:  value.Expire(),
 			data: buf.Bytes(),
-		}, int64(buf.Len()), value.Expire(), true)
+		}, int64(buf.Len()), true)
 		return nil
 	}
 
-	_, err := c.readAndSet(key, value, value.Expire(), true)
+	_, err := c.readAndSet(key, value, true)
 	return err
 }
 
-func (c *memory) setValue(key string, val byteValue, len int64, expire time.Duration, force bool) {
+func (c *memory) setValue(key string, val byteValue, len int64, force bool) {
 	for i := 0; i < 1000; i++ {
-		if c.cache.SetWithTTL(key, val, len, expire) {
+		if c.cache.Set(key, val, len) {
 			return
 		}
 		if !force {
@@ -134,12 +119,12 @@ func (c *memory) set(key string, value *view.View) error {
 	go func() {
 		defer func() {
 			pipeW.Close()
-			if rc, ok := oldReader.(io.ReadCloser); ok {
+			if rc, ok := oldReader.(io.Closer); ok {
 				rc.Close()
 			}
 		}()
 
-		_, err := c.readAndSet(key, ioutil.NopCloser(teeReader), value.Expire(), false)
+		_, err := c.readAndSet(key, ioutil.NopCloser(teeReader), false)
 		if err != nil {
 			c.logger.Errorf("read and set err: %s", err.Error())
 			return
@@ -148,32 +133,36 @@ func (c *memory) set(key string, value *view.View) error {
 	return nil
 }
 
-func (c *memory) readAndSet(key string, r io.Reader, expire time.Duration, force bool) (*bytes.Buffer, error) {
-	bullPool := c.bufPool.Get()
-	defer c.bufPool.Put(bullPool)
+func (c *memory) readAndSet(key string, r io.Reader, force bool) (*bytes.Buffer, error) {
+	buffPool := c.bufPool.Get()
+	defer c.bufPool.Put(buffPool)
 
 	buff := bytes.NewBuffer(nil)
 
-	//TODO discard if increase max file limit. https://github.com/djherbis/buffer buffer.NewSpill can be used
-	wrote, err := io.CopyBuffer(buff, r, bullPool)
+	wrote, err := io.CopyBuffer(buff, io.LimitReader(r, c.maxInstanceSize), buffPool)
 	if err != nil {
 		err = fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
 		c.logger.Errorf(err.Error())
 		return nil, err
 	}
 
+	// copy all data if limit was increased
+	io.CopyBuffer(ioutil.Discard, r, buffPool)
+
+	if wrote >= c.maxInstanceSize {
+		return nil, nil
+	}
+
 	val := byteValue{
-		ttl:  expire,
 		data: buff.Bytes(),
 	}
 
-	c.setValue(key, val, wrote, expire, force)
+	c.setValue(key, val, wrote, force)
 
 	return buff, nil
 }
 
 type byteValue struct {
-	ttl  time.Duration
 	data []byte
 }
 
@@ -189,7 +178,7 @@ func (c *memory) Get(key string) (*view.View, bool) {
 		return nil, false
 	}
 
-	return view.NewView(bytes.NewBuffer(val.data), val.ttl), true
+	return view.NewView(bytes.NewBuffer(val.data)), true
 }
 
 func (c *memory) Remove(key string) {
