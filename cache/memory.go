@@ -95,7 +95,7 @@ func (c *memory) Stats() CacheStats {
 func (c *memory) Add(key string, value *view.View) error {
 	if buf, ok := value.BytesBuffer(); ok {
 		if c.cache.Set(key, struct{}{}, int64(buf.Len())) {
-			c.data.add(key, buf.Bytes())
+			c.data.add(key, buf.Bytes()[:buf.Len()])
 		}
 
 		return nil
@@ -108,7 +108,7 @@ func (c *memory) AddForce(key string, value *view.View) error {
 	defer value.Close()
 
 	if buf, ok := value.BytesBuffer(); ok {
-		c.setValue(key, buf.Bytes(), int64(buf.Len()), true)
+		c.setValue(key, buf.Bytes()[:buf.Len()], int64(buf.Len()), true)
 		return nil
 	}
 
@@ -150,11 +150,13 @@ func (c *memory) set(key string, value *view.View) error {
 	return nil
 }
 
+const bufferInitCapacity = 10 * 1024 * 1024
+
 func (c *memory) readAndSet(key string, r io.Reader, force bool) (*bytes.Buffer, error) {
 	buffPool := c.bufPool.Get()
 	defer c.bufPool.Put(buffPool)
 
-	buff := bytes.NewBuffer(nil)
+	buff := bytes.NewBuffer(make([]byte, 0, bufferInitCapacity))
 
 	wrote, err := io.CopyBuffer(buff, io.LimitReader(r, c.maxInstanceSize), buffPool)
 	if err != nil {
@@ -170,7 +172,7 @@ func (c *memory) readAndSet(key string, r io.Reader, force bool) (*bytes.Buffer,
 		return nil, nil
 	}
 
-	c.setValue(key, buff.Bytes(), wrote, force)
+	c.setValue(key, buff.Bytes()[:buff.Len()], wrote, force)
 
 	return buff, nil
 }
