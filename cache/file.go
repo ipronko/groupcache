@@ -61,7 +61,18 @@ func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 
 	go c.restoreFiles()
 
+	// TODO del after debug
+	go c.printStats()
+
 	return c, nil
+}
+
+func (c file) printStats() {
+	t := time.NewTimer(time.Second * 10)
+	defer t.Stop()
+	for range t.C {
+		c.logger.Infof("file cache stats: %s", c.cache.Metrics.String())
+	}
 }
 
 func onEvict(value interface{}, logger Logger) {
@@ -104,9 +115,19 @@ func (c *file) restoreFiles() {
 		}
 	}()
 
+	var filesAdded int64
 	for file := range fileCh {
-		c.cache.Set(filepath.Base(file.filePath), file, file.size)
+		ok := c.cache.Set(filepath.Base(file.filePath), file, file.size)
+		if !ok {
+			err := file.delete()
+			if err != nil {
+				c.logger.Errorf("delete file %s error: %s", file.filePath, err.Error())
+			}
+			continue
+		}
+		filesAdded++
 	}
+	c.logger.Infof("file cache: restore job: cache files restored: %d", filesAdded)
 }
 
 func (c *file) Add(key string, value *view.View) error {

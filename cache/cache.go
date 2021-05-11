@@ -17,6 +17,7 @@ type ViewCache interface {
 
 type Logger interface {
 	Errorf(template string, args ...interface{})
+	Infof(template string, args ...interface{})
 }
 
 // CacheStats are returned by stats accessors on Group.
@@ -39,6 +40,7 @@ const (
 type nopLogger struct{}
 
 func (l nopLogger) Errorf(_ string, _ ...interface{}) {}
+func (l nopLogger) Infof(_ string, _ ...interface{})  {}
 
 func getCache(maxSize int64, opts Options) (*ristretto.Cache, error) {
 	rCache := new(ristretto.Cache)

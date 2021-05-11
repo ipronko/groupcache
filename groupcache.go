@@ -26,6 +26,7 @@ package groupcache
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -102,7 +103,46 @@ func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts
 		return nil, err
 	}
 
+	//TODO del after debug
+	if logger != nil {
+		go func() {
+			t := time.NewTimer(time.Second * 10)
+			defer t.Stop()
+			for range t.C {
+				stats("file group", fileGroup.Stats)
+				stats("memory group", memGroup.Stats)
+			}
+			logger.Errorf("groupcache stats exit")
+		}()
+	}
+
 	return memGroup, nil
+}
+
+func stats(name string, stats Stats) {
+	stat := struct {
+		Gets                     int64
+		Loads                    int64
+		PeerLoads                int64
+		CacheHits                int64
+		LocalLoadErrs            int64
+		LocalLoads               int64
+		GetFromPeersLatencyLower int64
+		PeerErrors               int64
+		ServerRequests           int64
+	}{
+		Gets:                     stats.Gets.Get(),
+		Loads:                    stats.Loads.Get(),
+		PeerLoads:                stats.PeerLoads.Get(),
+		CacheHits:                stats.CacheHits.Get(),
+		LocalLoadErrs:            stats.LocalLoadErrs.Get(),
+		LocalLoads:               stats.LocalLoads.Get(),
+		GetFromPeersLatencyLower: stats.GetFromPeersLatencyLower.Get(),
+		PeerErrors:               stats.PeerErrors.Get(),
+		ServerRequests:           stats.ServerRequests.Get(),
+	}
+	data, _ := json.Marshal(stat)
+	logger.Infof("%s: cache stats: %s", name, string(data))
 }
 
 func NewMemory(name string, cacheBytes int64, getter Getter, cacheOpts cache.Options) (*Group, error) {

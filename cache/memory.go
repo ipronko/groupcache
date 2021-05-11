@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"time"
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/oxtoacart/bpool"
@@ -27,7 +28,18 @@ func NewMemory(maxSize int64, opts Options) (*memory, error) {
 		logger:          opts.Logger,
 	}
 
+	// TODO del after debug
+	go c.printStats()
+
 	return c, nil
+}
+
+func (c *memory) printStats() {
+	t := time.NewTimer(time.Second * 10)
+	defer t.Stop()
+	for range t.C {
+		c.logger.Infof("memory cache stats: %s", c.cache.Metrics.String())
+	}
 }
 
 type Options struct {
