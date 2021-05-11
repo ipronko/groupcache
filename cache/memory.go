@@ -26,7 +26,17 @@ func NewMemory(maxSize int64, opts Options) (*memory, error) {
 		logger:          opts.Logger,
 	}
 
-	rCache, err := getCache(maxSize, opts, br.evict)
+	//TODO mave back after debug
+	//rCache, err := getCache(maxSize, opts, br.evict)
+	rCache, err := getCache(maxSize, opts, func(value interface{}) {
+		val, ok := value.(byteValue)
+		if !ok {
+			opts.Logger.Errorf("HASH: evict %s key error: not a byte value", val.key)
+			return
+		}
+		opts.Logger.Infof("HASH: evict %s key", val.key)
+		br.delete(val.key)
+	})
 	if err != nil {
 		return nil, err
 	}
