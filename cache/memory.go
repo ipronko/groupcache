@@ -3,8 +3,10 @@ package cache
 import (
 	"bytes"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/ioutil"
+	"sync"
 	"time"
 
 	"github.com/dgraph-io/ristretto"
@@ -23,6 +25,7 @@ func NewMemory(maxSize int64, opts Options) (*memory, error) {
 
 	c := &memory{
 		maxInstanceSize: opts.MaxInstanceSize,
+		data:            newByteResolver(),
 		cache:           rCache,
 		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
 		logger:          opts.Logger,
@@ -35,9 +38,8 @@ func NewMemory(maxSize int64, opts Options) (*memory, error) {
 }
 
 func (c *memory) printStats() {
-	t := time.NewTimer(time.Second * 10)
-	defer t.Stop()
-	for range t.C {
+	for {
+		<-time.After(time.Second * 10)
 		c.logger.Infof("memory cache stats: %s", c.cache.Metrics.String())
 	}
 }
@@ -74,6 +76,7 @@ type StoreType int
 // cache is a wrapper around an *ristretto.Cache
 type memory struct {
 	bufPool         *bpool.BytePool
+	data            *byteResolver
 	maxInstanceSize int64
 	logger          Logger
 	cache           *ristretto.Cache
@@ -91,7 +94,10 @@ func (c *memory) Stats() CacheStats {
 
 func (c *memory) Add(key string, value *view.View) error {
 	if buf, ok := value.BytesBuffer(); ok {
-		c.cache.Set(key, byteValue{data: buf.Bytes()}, int64(buf.Len()))
+		if c.cache.Set(key, struct{}{}, int64(buf.Len())) {
+			c.data.add(key, buf.Bytes())
+		}
+
 		return nil
 	}
 
@@ -102,9 +108,7 @@ func (c *memory) AddForce(key string, value *view.View) error {
 	defer value.Close()
 
 	if buf, ok := value.BytesBuffer(); ok {
-		c.setValue(key, byteValue{
-			data: buf.Bytes(),
-		}, int64(buf.Len()), true)
+		c.setValue(key, buf.Bytes(), int64(buf.Len()), true)
 		return nil
 	}
 
@@ -112,9 +116,10 @@ func (c *memory) AddForce(key string, value *view.View) error {
 	return err
 }
 
-func (c *memory) setValue(key string, val byteValue, len int64, force bool) {
+func (c *memory) setValue(key string, val []byte, len int64, force bool) {
 	for i := 0; i < 1000; i++ {
-		if c.cache.Set(key, val, len) {
+		if c.cache.Set(key, struct{}{}, len) {
+			c.data.add(key, val)
 			return
 		}
 		if !force {
@@ -165,34 +170,87 @@ func (c *memory) readAndSet(key string, r io.Reader, force bool) (*bytes.Buffer,
 		return nil, nil
 	}
 
-	val := byteValue{
-		data: buff.Bytes(),
-	}
-
-	c.setValue(key, val, wrote, force)
+	c.setValue(key, buff.Bytes(), wrote, force)
 
 	return buff, nil
 }
 
-type byteValue struct {
-	data []byte
-}
-
 func (c *memory) Get(key string) (*view.View, bool) {
-	vi, ok := c.cache.Get(key)
+	_, ok := c.cache.Get(key)
 	if !ok {
 		return nil, false
 	}
 
-	val, ok := vi.(byteValue)
+	val, ok := c.data.get(key)
 	if !ok {
 		c.Remove(key)
 		return nil, false
 	}
 
-	return view.NewView(bytes.NewBuffer(val.data)), true
+	return view.NewView(bytes.NewBuffer(val)), true
 }
 
 func (c *memory) Remove(key string) {
 	c.cache.Del(key)
+	c.data.delete(key)
+}
+
+const buckets = 8
+
+func newByteResolver() *byteResolver {
+	br := &byteResolver{buckets: make([]*bucket, buckets)}
+	for i := 0; i < buckets; i++ {
+		br.buckets[i] = &bucket{data: make(map[string][]byte)}
+	}
+	return br
+}
+
+type byteResolver struct {
+	buckets []*bucket
+}
+
+type bucket struct {
+	sync.RWMutex
+	data map[string][]byte
+}
+
+func (b *bucket) get(key string) ([]byte, bool) {
+	b.RLock()
+	val, ok := b.data[key]
+	b.RUnlock()
+	return val, ok
+}
+
+func (b *bucket) delete(key string) {
+	b.Lock()
+	delete(b.data, key)
+	b.Unlock()
+}
+
+func (b *bucket) add(key string, value []byte) {
+	b.Lock()
+	b.data[key] = value
+	b.Unlock()
+}
+
+func (br *byteResolver) add(key string, value []byte) {
+	br.getBucket(key).add(key, value)
+}
+
+func (br *byteResolver) get(key string) ([]byte, bool) {
+	return br.getBucket(key).get(key)
+}
+
+func (br *byteResolver) delete(key string) {
+	br.getBucket(key).delete(key)
+}
+
+func (br *byteResolver) getBucket(key string) *bucket {
+	return br.buckets[hashNumber(key)%len(br.buckets)]
+}
+
+func hashNumber(s string) int {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return int(h.Sum32())
 }

@@ -106,13 +106,12 @@ func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts
 	//TODO del after debug
 	if logger != nil {
 		go func() {
-			t := time.NewTimer(time.Second * 10)
-			defer t.Stop()
-			for range t.C {
+			logger.Infof("groupcache stats start")
+			for {
+				<-time.After(time.Second * 10)
 				stats("file group", fileGroup.Stats)
 				stats("memory group", memGroup.Stats)
 			}
-			logger.Errorf("groupcache stats exit")
 		}()
 	}
 

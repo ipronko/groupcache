@@ -67,10 +67,9 @@ func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 	return c, nil
 }
 
-func (c file) printStats() {
-	t := time.NewTimer(time.Second * 10)
-	defer t.Stop()
-	for range t.C {
+func (c *file) printStats() {
+	for {
+		<-time.After(time.Second * 10)
 		c.logger.Infof("file cache stats: %s", c.cache.Metrics.String())
 	}
 }
