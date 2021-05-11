@@ -18,18 +18,20 @@ import (
 func NewMemory(maxSize int64, opts Options) (*memory, error) {
 	opts.Complete(maxSize)
 
-	rCache, err := getCache(maxSize, opts)
+	br := newByteResolver()
+	c := &memory{
+		maxInstanceSize: opts.MaxInstanceSize,
+		data:            br,
+		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
+		logger:          opts.Logger,
+	}
+
+	rCache, err := getCache(maxSize, opts, br.evict)
 	if err != nil {
 		return nil, err
 	}
 
-	c := &memory{
-		maxInstanceSize: opts.MaxInstanceSize,
-		data:            newByteResolver(),
-		cache:           rCache,
-		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
-		logger:          opts.Logger,
-	}
+	c.cache = rCache
 
 	// TODO del after debug
 	go c.printStats()
@@ -94,7 +96,7 @@ func (c *memory) Stats() CacheStats {
 
 func (c *memory) Add(key string, value *view.View) error {
 	if buf, ok := value.BytesBuffer(); ok {
-		if c.cache.Set(key, struct{}{}, int64(buf.Len())) {
+		if c.cache.Set(key, byteValue{key: key}, int64(buf.Len())) {
 			c.data.add(key, buf.Bytes()[:buf.Len()])
 		}
 
@@ -118,7 +120,7 @@ func (c *memory) AddForce(key string, value *view.View) error {
 
 func (c *memory) setValue(key string, val []byte, len int64, force bool) {
 	for i := 0; i < 1000; i++ {
-		if c.cache.Set(key, struct{}{}, len) {
+		if c.cache.Set(key, byteValue{key: key}, len) {
 			c.data.add(key, val)
 			return
 		}
@@ -199,6 +201,10 @@ func (c *memory) Remove(key string) {
 
 const buckets = 8
 
+type byteValue struct {
+	key string
+}
+
 func newByteResolver() *byteResolver {
 	br := &byteResolver{buckets: make([]*bucket, buckets)}
 	for i := 0; i < buckets; i++ {
@@ -245,6 +251,14 @@ func (br *byteResolver) get(key string) ([]byte, bool) {
 
 func (br *byteResolver) delete(key string) {
 	br.getBucket(key).delete(key)
+}
+
+func (br *byteResolver) evict(value interface{}) {
+	val, ok := value.(byteValue)
+	if !ok {
+		return
+	}
+	br.delete(val.key)
 }
 
 func (br *byteResolver) getBucket(key string) *bucket {

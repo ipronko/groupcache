@@ -12,6 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 	"github.com/djherbis/fscache"
 	"github.com/oxtoacart/bpool"
+	"github.com/pkg/errors"
 
 	"github.com/ipronko/groupcache/popular"
 	"github.com/ipronko/groupcache/view"
@@ -41,14 +42,8 @@ func (o *FileOptions) Complete(maxSize int64) {
 func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 	opts.Complete(maxSize)
 
-	rCache, err := getCache(maxSize, opts.Options)
-	if err != nil {
-		return nil, err
-	}
-
 	c := &file{
 		maxInstanceSize: opts.MaxInstanceSize,
-		cache:           rCache,
 		logger:          opts.Logger,
 		popularFiles:    popular.New(*opts.SkipFirstCalls, time.Hour*24*30),
 	}
@@ -58,6 +53,18 @@ func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 		return nil, err
 	}
 	c.fileResolver = fr
+
+	rCache, err := getCache(maxSize, opts.Options, func(value interface{}) {
+		err := fr.evict(value)
+		if err != nil {
+			opts.Logger.Errorf("evict file err: %s", err.Error())
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	c.cache = rCache
 
 	go c.restoreFiles()
 
@@ -71,17 +78,6 @@ func (c *file) printStats() {
 	for {
 		<-time.After(time.Second * 10)
 		c.logger.Infof("file cache stats: %s", c.cache.Metrics.String())
-	}
-}
-
-func onEvict(value interface{}, logger Logger) {
-	val, ok := value.(fileValue)
-	if !ok {
-		return
-	}
-	err := val.delete()
-	if err != nil {
-		logger.Errorf("delete file %s err: %s", val.filePath, err)
 	}
 }
 
@@ -302,6 +298,15 @@ func (f *fileResolver) delete(key string) error {
 		return err
 	}
 	return nil
+}
+
+func (f *fileResolver) evict(value interface{}) error {
+	val, ok := value.(fileValue)
+	if !ok {
+		return nil
+	}
+	err := val.delete()
+	return errors.WithMessagef(err, "delete file %s", val.filePath)
 }
 
 func (f *fileResolver) newFile(key string, size int64) fileValue {

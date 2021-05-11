@@ -42,7 +42,7 @@ type nopLogger struct{}
 func (l nopLogger) Errorf(_ string, _ ...interface{}) {}
 func (l nopLogger) Infof(_ string, _ ...interface{})  {}
 
-func getCache(maxSize int64, opts Options) (*ristretto.Cache, error) {
+func getCache(maxSize int64, opts Options, evictFunc func(value interface{})) (*ristretto.Cache, error) {
 	rCache := new(ristretto.Cache)
 
 	config := &ristretto.Config{
@@ -53,7 +53,7 @@ func getCache(maxSize int64, opts Options) (*ristretto.Cache, error) {
 	}
 
 	config.OnEvict = func(key, conflict uint64, value interface{}, cost int64) {
-		onEvict(value, opts.Logger)
+		evictFunc(value)
 	}
 
 	rCache, err := ristretto.NewCache(config)
