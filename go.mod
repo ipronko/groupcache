@@ -20,7 +20,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/segmentio/fasthash v1.0.3
 	github.com/sirupsen/logrus v1.7.0
-	github.com/stretchr/testify v1.6.1 // indirect
+	go.uber.org/multierr v1.7.0
 	golang.org/x/crypto v0.0.0-20200930160638-afb6bcd081ae // indirect
 	golang.org/x/net v0.0.0-20200930145003-4acb6c075d10 // indirect
 	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c // indirect

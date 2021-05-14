@@ -11,9 +11,9 @@ import (
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/djherbis/fscache"
-	"github.com/hashicorp/go-multierror"
 	"github.com/oxtoacart/bpool"
 	"github.com/pkg/errors"
+	"go.uber.org/multierr"
 
 	"github.com/ipronko/groupcache/popular"
 	"github.com/ipronko/groupcache/view"
@@ -328,9 +328,8 @@ func (f *fileResolver) overTemp(key string, r io.Reader, w io.WriteCloser) (file
 	bullPool := f.buffPool.Get()
 	defer func() {
 		f.buffPool.Put(bullPool)
-		mErr := multierror.Append(err, errors.WithMessagef(w.Close(), "close tmp file writer"))
-		mErr = multierror.Append(mErr, errors.WithMessagef(f.tmpCache.Remove(key), "remove tmp file key: %s", key))
-		err = mErr.ErrorOrNil()
+		err := multierr.Append(err, errors.WithMessagef(w.Close(), "close tmp file writer"))
+		err = multierr.Append(err, errors.WithMessagef(f.tmpCache.Remove(key), "remove tmp file key: %s", key))
 	}()
 
 	wrote, err := io.CopyBuffer(w, r, bullPool)
