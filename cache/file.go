@@ -141,7 +141,7 @@ func (c *file) AddForce(key string, value *view.View) error {
 func (c *file) set(key string, value *view.View, force bool) error {
 	reader, writer, err := c.fileResolver.createTemp(key)
 	if err != nil {
-		c.logger.Errorf("skip creating tmp file, err: %w", err)
+		c.logger.Errorf("skip creating tmp file, err: %s", err.Error())
 		return nil
 	}
 
@@ -162,7 +162,7 @@ func (c *file) set(key string, value *view.View, force bool) error {
 
 		file, err := c.fileResolver.overTemp(key, oldReader, writer)
 		if err != nil {
-			c.logger.Errorf("write to tmp file err: %w", err)
+			c.logger.Errorf("write to tmp file err: %s", err.Error())
 			return
 		}
 
@@ -170,7 +170,7 @@ func (c *file) set(key string, value *view.View, force bool) error {
 		if !ok {
 			err := c.fileResolver.delete(key)
 			if err != nil {
-				c.logger.Errorf("copy from reader to bytes buffer err: %w", err)
+				c.logger.Errorf("copy from reader to bytes buffer err: %s", err.Error())
 				return
 			}
 		}
@@ -307,7 +307,7 @@ func (f *fileResolver) delete(key string) error {
 func (f *fileResolver) evict(value interface{}) error {
 	val, ok := value.(fileValue)
 	if !ok {
-		return nil
+		return errors.Errorf("try evict not file value %T, %v", value, value)
 	}
 	err := val.delete()
 	return errors.WithMessagef(err, "delete file %s", val.filePath)
