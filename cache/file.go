@@ -11,6 +11,7 @@ import (
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/djherbis/fscache"
+	"github.com/hashicorp/go-multierror"
 	"github.com/oxtoacart/bpool"
 	"github.com/pkg/errors"
 
@@ -242,6 +243,8 @@ func newFileResolver(rootDir string, copyBufferSize, copyBufferWidth int) (*file
 		return nil, fmt.Errorf("create tmp fscache err: %w", err)
 	}
 
+	//TODO run job to delete old tmp files (with schedule)
+
 	return &fileResolver{
 		buffPool: bpool.NewBytePool(copyBufferSize, copyBufferWidth),
 		tmpCache: tmpCache,
@@ -262,6 +265,7 @@ func (f *fileResolver) exists(key string) (io.ReadCloser, bool) {
 	}
 
 	if writer != nil {
+		//TODO log errors
 		writer.Close()
 		rc.Close()
 		f.tmpCache.Remove(key)
@@ -320,34 +324,33 @@ func (f *fileResolver) createTemp(key string) (fscache.ReadAtCloser, io.WriteClo
 	return f.tmpCache.Get(key)
 }
 
-func (f *fileResolver) overTemp(key string, r io.Reader, w io.WriteCloser) (fileValue, error) {
+func (f *fileResolver) overTemp(key string, r io.Reader, w io.WriteCloser) (fileV fileValue, err error) {
 	bullPool := f.buffPool.Get()
 	defer func() {
 		f.buffPool.Put(bullPool)
-		w.Close()
-		f.tmpCache.Remove(key)
-
+		mErr := multierror.Append(err, errors.WithMessagef(w.Close(), "close tmp file writer"))
+		mErr = multierror.Append(mErr, errors.WithMessagef(f.tmpCache.Remove(key), "remove tmp file key: %s", key))
+		err = mErr.ErrorOrNil()
 	}()
 
 	wrote, err := io.CopyBuffer(w, r, bullPool)
 	if err != nil {
-		return fileValue{}, fmt.Errorf("copy from reader to bytes buffer err: %w", err)
+		return fileV, fmt.Errorf("copy from reader to bytes buffer err: %w", err)
 	}
 
-	file := f.newFile(key, wrote)
+	fileV = f.newFile(key, wrote)
 
 	nameGetter, ok := w.(interface{ Name() string })
 	if !ok {
-		return file, fmt.Errorf("cant resolve tmp file name, key: %s", key)
+		return fileV, fmt.Errorf("cant resolve tmp file name, key: %s", key)
 	}
 
-	err = f.moveToFiles(nameGetter.Name(), file.filePath)
+	err = f.moveToFiles(nameGetter.Name(), fileV.filePath)
 	if err != nil {
-
-		return file, fmt.Errorf("move tmp file to files err: %w", err)
+		return fileV, fmt.Errorf("move tmp file to files err: %w", err)
 	}
 
-	return file, nil
+	return fileV, nil
 }
 
 func (f *fileResolver) moveToFiles(from, to string) error {
