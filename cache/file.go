@@ -231,9 +231,14 @@ func newFileResolver(rootDir string, copyBufferSize, copyBufferWidth int) (*file
 	tmpRoot := filepath.Join(rootDir, tempPath)
 	fileRoot := filepath.Join(rootDir, filePath)
 
-	if err := os.MkdirAll(tmpRoot, 0700); err != nil && !os.IsExist(err) {
+	if err := os.RemoveAll(tmpRoot); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove previous tmp files err: %w", err)
+	}
+
+	if err := os.MkdirAll(tmpRoot, 0700); err != nil {
 		return nil, fmt.Errorf("create dirs for tmp files")
 	}
+
 	if err := os.MkdirAll(fileRoot, 0700); err != nil && !os.IsExist(err) {
 		return nil, fmt.Errorf("create dirs for files")
 	}
@@ -242,8 +247,6 @@ func newFileResolver(rootDir string, copyBufferSize, copyBufferWidth int) (*file
 	if err != nil {
 		return nil, fmt.Errorf("create tmp fscache err: %w", err)
 	}
-
-	//TODO run job to delete old tmp files (with schedule)
 
 	return &fileResolver{
 		buffPool: bpool.NewBytePool(copyBufferSize, copyBufferWidth),
