@@ -7,13 +7,10 @@ import (
 	"io"
 	"io/ioutil"
 	"sync"
-	"time"
 
 	"github.com/dgraph-io/ristretto"
-	"github.com/oxtoacart/bpool"
-	"go.uber.org/atomic"
-
 	"github.com/ipronko/groupcache/view"
+	"github.com/oxtoacart/bpool"
 )
 
 func NewMemory(maxSize int64, opts Options) (*memory, error) {
@@ -21,41 +18,20 @@ func NewMemory(maxSize int64, opts Options) (*memory, error) {
 
 	br := newByteResolver()
 	c := &memory{
-		maxInstanceSize:  opts.MaxInstanceSize,
-		data:             br,
-		bufPool:          bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
-		logger:           opts.Logger,
-		currentCopyCount: atomic.NewInt64(0),
+		maxInstanceSize: opts.MaxInstanceSize,
+		data:            br,
+		bufPool:         bpool.NewBytePool(opts.CopyBufferSize, opts.CopyBufferWidth),
+		logger:          opts.Logger,
 	}
 
-	//TODO mave back after debug
-	//rCache, err := getCache(maxSize, opts, br.evict)
-	rCache, err := getCache(maxSize, opts, func(value interface{}) {
-		val, ok := value.(byteValue)
-		if !ok {
-			opts.Logger.Errorf("HASH: evict %s key error: not a byte value", val.key)
-			return
-		}
-		opts.Logger.Infof("HASH: evict %s key", val.key)
-		br.delete(val.key)
-	})
+	rCache, err := getCache(maxSize, opts, br.evict)
 	if err != nil {
 		return nil, err
 	}
 
 	c.cache = rCache
 
-	// TODO del after debug
-	go c.printStats()
-
 	return c, nil
-}
-
-func (c *memory) printStats() {
-	for {
-		<-time.After(time.Second * 10)
-		c.logger.Infof("bytes in copying: %d, memory cache stats: %s", c.currentCopyCount.Load(), c.cache.Metrics.String())
-	}
 }
 
 type Options struct {
@@ -94,9 +70,6 @@ type memory struct {
 	maxInstanceSize int64
 	logger          Logger
 	cache           *ristretto.Cache
-
-	//TODO del after debug
-	currentCopyCount *atomic.Int64
 }
 
 func (c *memory) Stats() CacheStats {
@@ -173,17 +146,16 @@ func (c *memory) readAndSet(key string, r io.Reader, force bool) error {
 
 	buff := bytes.NewBuffer(make([]byte, 0, bufferInitCapacity))
 
-	wrote, err := io.CopyBuffer(buff, copyCounter{r: io.LimitReader(r, c.maxInstanceSize), count: c.currentCopyCount}, buffPool)
+	wrote, err := io.CopyBuffer(buff, io.LimitReader(r, c.maxInstanceSize), buffPool)
 	if err != nil {
 		err = fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
 		c.logger.Errorf(err.Error())
 		return err
 	}
 
+	// discard all data if limit was increased
 	if wrote >= c.maxInstanceSize {
-		// copy all data if limit was increased
 		buff = nil
-		c.currentCopyCount.Add(-wrote)
 		io.CopyBuffer(ioutil.Discard, r, buffPool)
 		return nil
 	}
@@ -192,19 +164,7 @@ func (c *memory) readAndSet(key string, r io.Reader, force bool) error {
 	copy(b, buff.Bytes())
 	c.setValue(key, b, wrote, force)
 
-	c.currentCopyCount.Add(-wrote)
 	return nil
-}
-
-type copyCounter struct {
-	count *atomic.Int64
-	r     io.Reader
-}
-
-func (cc copyCounter) Read(b []byte) (int, error) {
-	n, err := cc.Read(b)
-	cc.count.Add(int64(n))
-	return n, err
 }
 
 func (c *memory) Get(key string) (*view.View, bool) {
