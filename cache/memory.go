@@ -9,8 +9,9 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/ristretto"
-	"github.com/ipronko/groupcache/view"
 	"github.com/oxtoacart/bpool"
+
+	"github.com/ipronko/groupcache/view"
 )
 
 func NewMemory(maxSize int64, opts Options) (*memory, error) {
@@ -148,9 +149,7 @@ func (c *memory) readAndSet(key string, r io.Reader, force bool) error {
 
 	wrote, err := io.CopyBuffer(buff, io.LimitReader(r, c.maxInstanceSize), buffPool)
 	if err != nil {
-		err = fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
-		c.logger.Errorf(err.Error())
-		return err
+		return fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
 	}
 
 	// discard all data if limit was increased

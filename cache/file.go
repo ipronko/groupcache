@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -162,7 +163,10 @@ func (c *file) set(key string, value *view.View, force bool) error {
 
 		file, err := c.fileResolver.overTemp(key, oldReader, writer)
 		if err != nil {
-			c.logger.Errorf("write to tmp file err: %s", err.Error())
+			c.fileResolver.delete(key)
+			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+				c.logger.Errorf("write to tmp file err: %s", err.Error())
+			}
 			return
 		}
 
@@ -170,7 +174,7 @@ func (c *file) set(key string, value *view.View, force bool) error {
 		if !ok {
 			err := c.fileResolver.delete(key)
 			if err != nil {
-				c.logger.Errorf("copy from reader to bytes buffer err: %s", err.Error())
+				c.logger.Errorf("delete %s file err: %s", key, err.Error())
 				return
 			}
 		}
