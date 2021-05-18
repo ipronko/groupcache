@@ -3,7 +3,7 @@ module github.com/ipronko/groupcache
 require (
 	github.com/alecthomas/units v0.0.0-20210208195552-ff826a37aa15
 	github.com/armon/go-metrics v0.3.6 // indirect
-	github.com/dgraph-io/ristretto v0.0.3
+	github.com/dgraph-io/ristretto v0.0.4-0.20210310100713-a4346e5d1f90
 	github.com/djherbis/fscache v0.10.1
 	github.com/google/btree v1.0.0 // indirect
 	github.com/hashicorp/consul/api v1.8.1
