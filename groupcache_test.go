@@ -229,7 +229,7 @@ func TestPeers(t *testing.T) {
 		return view.NewView(rc), nil
 	}
 
-	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil, true, true)
+	testGroup, err := newGroup("TestPeers-group", GetterFunc(getter), peerList, nil, nil, false)
 	if err != nil {
 		panic(err)
 	}
@@ -343,7 +343,7 @@ func TestContextDeadlineOnPeer(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	testGroup, err := newGroup("TestContextDeadlineOnPeer-group", GetterFunc(getter), peerList, cache, cache, true, true)
+	testGroup, err := newGroup("TestContextDeadlineOnPeer-group", GetterFunc(getter), peerList, cache, cache, false)
 	if err != nil {
 		panic(err)
 	}
