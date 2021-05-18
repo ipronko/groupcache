@@ -58,9 +58,6 @@ func getCache(maxSize int64, opts Options, evictFunc func(value interface{})) (*
 	config.OnReject = func(item *ristretto.Item) {
 		evictFunc(item.Value)
 	}
-	config.OnExit = func(val interface{}) {
-		evictFunc(val)
-	}
 
 	rCache, err := ristretto.NewCache(config)
 	if err != nil {
