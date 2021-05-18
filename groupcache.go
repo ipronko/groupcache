@@ -276,6 +276,7 @@ type Stats struct {
 	LocalLoads               AtomicInt // total good local loads
 	LocalLoadErrs            AtomicInt // total bad local loads
 	ServerRequests           AtomicInt // gets that came over the network from peers
+	WarmUps                  AtomicInt
 }
 
 // Name returns the name of the group.
@@ -458,6 +459,7 @@ func (g *Group) warmUpLocally(ctx context.Context, key string) error {
 	}
 	defer v.Close()
 
+	g.Stats.WarmUps.Add(1)
 	return g.mainCache.AddForce(key, v)
 }
 
