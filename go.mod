@@ -3,8 +3,10 @@ module github.com/ipronko/groupcache
 require (
 	github.com/alecthomas/units v0.0.0-20210208195552-ff826a37aa15
 	github.com/armon/go-metrics v0.3.6 // indirect
-	github.com/dgraph-io/ristretto v0.0.4-0.20210310100713-a4346e5d1f90
+	github.com/cespare/xxhash v1.1.0 // indirect
+	github.com/dgraph-io/ristretto v0.0.4-0.20210521183725-9d4946d9b973
 	github.com/djherbis/fscache v0.10.1
+	github.com/golang/glog v0.0.0-20210429001901-424d2337a529 // indirect
 	github.com/google/btree v1.0.0 // indirect
 	github.com/hashicorp/consul/api v1.8.1
 	github.com/hashicorp/go-hclog v0.14.1 // indirect
@@ -23,7 +25,7 @@ require (
 	go.uber.org/multierr v1.7.0
 	golang.org/x/crypto v0.0.0-20200930160638-afb6bcd081ae // indirect
 	golang.org/x/net v0.0.0-20200930145003-4acb6c075d10 // indirect
-	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c // indirect
+	golang.org/x/sys v0.0.0-20210525143221-35b2ab0089ea // indirect
 	gopkg.in/djherbis/atime.v1 v1.0.0 // indirect
 	gopkg.in/djherbis/stream.v1 v1.3.1 // indirect
 )
