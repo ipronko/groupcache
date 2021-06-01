@@ -132,7 +132,6 @@ func (c *memory) set(key string, value *view.View) error {
 
 		err := c.readAndSet(key, teeReader, false)
 		if err != nil {
-			c.logger.Errorf("read and set err: %s", err.Error())
 			return
 		}
 	}()

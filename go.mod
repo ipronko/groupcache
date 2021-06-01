@@ -3,8 +3,9 @@ module github.com/ipronko/groupcache
 require (
 	github.com/alecthomas/units v0.0.0-20210208195552-ff826a37aa15
 	github.com/armon/go-metrics v0.3.6 // indirect
-	github.com/cespare/xxhash v1.1.0 // indirect
-	github.com/dgraph-io/ristretto v0.0.4-0.20210521183725-9d4946d9b973
+	// TODO resolve memory leak in new version
+	// github.com/dgraph-io/ristretto v0.0.4-0.20210521183725-9d4946d9b973
+	github.com/dgraph-io/ristretto v0.0.3
 	github.com/djherbis/fscache v0.10.1
 	github.com/golang/glog v0.0.0-20210429001901-424d2337a529 // indirect
 	github.com/google/btree v1.0.0 // indirect

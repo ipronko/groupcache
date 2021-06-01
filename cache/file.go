@@ -164,7 +164,9 @@ func (c *file) set(key string, value *view.View, force bool) error {
 		file, err := c.fileResolver.overTemp(key, oldReader, writer)
 		if err != nil {
 			c.fileResolver.delete(key)
-			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+			if !errors.Is(err, context.DeadlineExceeded) &&
+				!errors.Is(err, context.Canceled) &&
+				!errors.Is(err, io.ErrClosedPipe) {
 				c.logger.Errorf("write to tmp file err: %s", err.Error())
 			}
 			return
