@@ -70,17 +70,7 @@ func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 
 	go c.restoreFiles()
 
-	// TODO del after debug
-	go c.printStats()
-
 	return c, nil
-}
-
-func (c *file) printStats() {
-	for {
-		<-time.After(time.Second * 10)
-		c.logger.Infof("file cache stats: %s", c.cache.Metrics.String())
-	}
 }
 
 // file is a wrapper around an *ristretto.Cache
