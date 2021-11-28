@@ -2,7 +2,6 @@ package cache
 
 import (
 	"bytes"
-	"fmt"
 	"hash/fnv"
 	"io"
 	"io/ioutil"
@@ -83,26 +82,26 @@ func (c *memory) Stats() CacheStats {
 	}
 }
 
-func (c *memory) Add(key string, value *view.View) error {
+func (c *memory) Add(key string, value *view.View) {
 	if buf, ok := value.BytesBuffer(); ok {
 		if c.cache.Set(key, byteValue{key: key}, int64(buf.Len())) {
 			c.data.add(key, buf.Bytes())
 		}
-		return nil
+		return
 	}
 
-	return c.set(key, value)
+	c.set(key, value)
 }
 
-func (c *memory) AddForce(key string, value *view.View) error {
+func (c *memory) AddForce(key string, value *view.View) {
 	defer value.Close()
 
 	if buf, ok := value.BytesBuffer(); ok {
 		c.setValue(key, buf.Bytes(), int64(buf.Len()), true)
-		return nil
+		return
 	}
 
-	return c.readAndSet(key, value, true)
+	c.readAndSet(key, value, true)
 }
 
 func (c *memory) setValue(key string, val []byte, len int64, force bool) {
@@ -117,7 +116,7 @@ func (c *memory) setValue(key string, val []byte, len int64, force bool) {
 	}
 }
 
-func (c *memory) set(key string, value *view.View) error {
+func (c *memory) set(key string, value *view.View) {
 	pipeR, pipeW := io.Pipe()
 	oldReader := value.SwapReader(pipeR)
 	teeReader := io.TeeReader(oldReader, pipeW)
@@ -130,18 +129,13 @@ func (c *memory) set(key string, value *view.View) error {
 			}
 		}()
 
-		err := c.readAndSet(key, teeReader, false)
-		if err != nil {
-			c.logger.Errorf("read and set err: %s", err.Error())
-			return
-		}
+		c.readAndSet(key, teeReader, false)
 	}()
-	return nil
 }
 
 const bufferInitCapacity = 10 * 1024 * 1024
 
-func (c *memory) readAndSet(key string, r io.Reader, force bool) error {
+func (c *memory) readAndSet(key string, r io.Reader, force bool) {
 	buffPool := c.bufPool.Get()
 	defer c.bufPool.Put(buffPool)
 
@@ -149,21 +143,20 @@ func (c *memory) readAndSet(key string, r io.Reader, force bool) error {
 
 	wrote, err := io.CopyBuffer(buff, io.LimitReader(r, c.maxInstanceSize), buffPool)
 	if err != nil {
-		return fmt.Errorf("copy from reader to bytes buffer err: %s", err.Error())
+		c.logger.Errorf("memory cache: copy from reader to bytes buffer err: %s", err.Error())
+		return
 	}
 
 	// discard all data if limit was increased
 	if wrote >= c.maxInstanceSize {
 		buff = nil
 		io.CopyBuffer(ioutil.Discard, r, buffPool)
-		return nil
+		return
 	}
 
 	b := make([]byte, buff.Len())
 	copy(b, buff.Bytes())
 	c.setValue(key, b, wrote, force)
-
-	return nil
 }
 
 func (c *memory) Get(key string) (*view.View, bool) {

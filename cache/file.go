@@ -70,17 +70,7 @@ func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 
 	go c.restoreFiles()
 
-	// TODO del after debug
-	go c.printStats()
-
 	return c, nil
-}
-
-func (c *file) printStats() {
-	for {
-		<-time.After(time.Second * 10)
-		c.logger.Infof("file cache stats: %s", c.cache.Metrics.String())
-	}
 }
 
 // file is a wrapper around an *ristretto.Cache
@@ -127,23 +117,23 @@ func (c *file) restoreFiles() {
 	c.logger.Infof("file cache: restore job: cache files restored: %d", filesAdded)
 }
 
-func (c *file) Add(key string, value *view.View) error {
+func (c *file) Add(key string, value *view.View) {
 	if !c.popularFiles.IsPopular(key) {
-		return nil
+		return
 	}
 
-	return c.set(key, value, false)
+	c.set(key, value, false)
 }
 
-func (c *file) AddForce(key string, value *view.View) error {
-	return c.set(key, value, true)
+func (c *file) AddForce(key string, value *view.View) {
+	c.set(key, value, true)
 }
 
-func (c *file) set(key string, value *view.View, force bool) error {
+func (c *file) set(key string, value *view.View, force bool) {
 	reader, writer, err := c.fileResolver.createTemp(key)
 	if err != nil {
 		c.logger.Errorf("skip creating tmp file, err: %s", err.Error())
-		return nil
+		return
 	}
 
 	oldReader := value.SwapReader(reader)
@@ -151,7 +141,7 @@ func (c *file) set(key string, value *view.View, force bool) error {
 		if rc, ok := oldReader.(io.ReadCloser); ok {
 			rc.Close()
 		}
-		return nil
+		return
 	}
 
 	go func() {
@@ -180,7 +170,7 @@ func (c *file) set(key string, value *view.View, force bool) error {
 		}
 	}()
 
-	return nil
+	return
 }
 
 func (c *file) setValue(key string, val fileValue, len int64, force bool) bool {
@@ -208,6 +198,7 @@ func (c *file) Get(key string) (*view.View, bool) {
 	f, ok := vi.(fileValue)
 	if !ok {
 		c.Remove(key)
+		return nil, false
 	}
 
 	v, err := f.readerView()

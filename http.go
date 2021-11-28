@@ -328,6 +328,7 @@ func (h *httpGetter) Get(ctx context.Context, in *Request) (*view.View, error) {
 	}
 
 	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
 		return nil, fmt.Errorf("server returned: %v", res.Status)
 	}
 

@@ -135,7 +135,6 @@ func NewFile(name string, cacheBytes int64, getter Getter, cacheOpts cache.FileO
 	return newGroup(name, getter, nil, main, hotCache, false)
 }
 
-//TODO set files anly in memory cache, on evict move to file cache (could be memory leak if disk too slow)
 func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts cache.Options, fileOpts cache.FileOptions) (*Group, error) {
 	hotCache, err := cache.NewMemory(memorySize, memOpts)
 	if err != nil {
@@ -442,14 +441,17 @@ func (g *Group) load(ctx context.Context, key string) (*view.View, error) {
 func (g *Group) getLocally(ctx context.Context, key string) (*view.View, error) {
 	v, err := g.getter.Get(ctx, key)
 	if err != nil {
+		if v != nil {
+			v.Close()
+		}
 		return nil, err
 	}
 
-	err = g.mainCache.Add(key, v)
+	g.mainCache.Add(key, v)
 	if g.allToHot {
-		err = g.hotCache.Add(key, v)
+		g.hotCache.Add(key, v)
 	}
-	return v, err
+	return v, nil
 }
 
 func (g *Group) warmUpLocally(ctx context.Context, key string) error {
@@ -460,7 +462,8 @@ func (g *Group) warmUpLocally(ctx context.Context, key string) error {
 	defer v.Close()
 
 	g.Stats.WarmUps.Add(1)
-	return g.mainCache.AddForce(key, v)
+	g.mainCache.AddForce(key, v)
+	return nil
 }
 
 func (g *Group) getFromPeer(ctx context.Context, peer HTTPGetter, key string) (*view.View, error) {
@@ -474,9 +477,9 @@ func (g *Group) getFromPeer(ctx context.Context, peer HTTPGetter, key string) (*
 		return v, err
 	}
 
-	err = g.hotCache.Add(key, v)
+	g.hotCache.Add(key, v)
 
-	return v, err
+	return v, nil
 }
 
 func (g *Group) warmUpPeer(ctx context.Context, peer HTTPGetter, key string) error {
