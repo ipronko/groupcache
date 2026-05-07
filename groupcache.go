@@ -135,6 +135,25 @@ func NewFile(name string, cacheBytes int64, getter Getter, cacheOpts cache.FileO
 	return newGroup(name, getter, nil, main, hotCache, false)
 }
 
+// NewFileOnly creates a Group with a single file-backed cache and no hot
+// tier (the hot slot is filled with a noop cache). All cacheBytes go to the
+// main cache. Use this when you don't need the hot/main split — typically
+// when you have no peers (single node) or a fast peer network where saving
+// a peer round-trip on a small subset of keys isn't worth the duplicate
+// disk usage. The kernel page cache provides RAM caching of hot bytes.
+func NewFileOnly(name string, cacheBytes int64, getter Getter, cacheOpts cache.FileOptions) (*Group, error) {
+	if cacheOpts.RootPath == "" {
+		cacheOpts.RootPath = os.TempDir()
+	}
+	cacheOpts.RootPath = filepath.Join(cacheOpts.RootPath, groupcacheSubdir)
+	main, err := cache.NewFile(cacheBytes, cacheOpts)
+	if err != nil {
+		return nil, fmt.Errorf("creating main cache err: %w", err)
+	}
+
+	return newGroup(name, getter, nil, main, cache.NewNoop(), false)
+}
+
 func NewCombined(name string, memorySize, fileSize int64, getter Getter, memOpts cache.Options, fileOpts cache.FileOptions) (*Group, error) {
 	hotCache, err := cache.NewMemory(memorySize, memOpts)
 	if err != nil {
