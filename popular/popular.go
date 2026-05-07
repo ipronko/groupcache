@@ -21,8 +21,6 @@ func New(popularFrom int, ttl time.Duration) *HitStore {
 	return h
 }
 
-type OnDelete func(key string)
-
 type HitStore struct {
 	rotateDuration time.Duration
 	popularityHits int
@@ -46,38 +44,12 @@ func (h *HitStore) gc() {
 }
 
 func (h *HitStore) deleteOld() {
+	h.m.Lock()
+	defer h.m.Unlock()
 	if len(h.buckets) == 1 {
 		return
 	}
-
-	h.m.Lock()
-	pop, b := h.buckets[0], h.buckets[1:]
-	h.buckets = b
-	h.m.Unlock()
-
-	go h.finishBucket(pop)
-}
-
-func (h *HitStore) finishBucket(b *bucket) {
-	for k := range b.data {
-		if h.has(k) {
-			continue
-		}
-	}
-	return
-}
-
-func (h *HitStore) has(key string) bool {
-	h.m.RLock()
-	for i := range h.buckets {
-		if h.buckets[i].has(key) {
-			h.m.RUnlock()
-			return true
-		}
-	}
-	h.m.RUnlock()
-
-	return false
+	h.buckets = h.buckets[1:]
 }
 
 func (h *HitStore) hit(key string) {
@@ -117,11 +89,6 @@ type bucket struct {
 
 func (b *bucket) hit(key string) {
 	b.data[key]++
-}
-
-func (b *bucket) has(key string) bool {
-	_, ok := b.data[key]
-	return ok
 }
 
 func (b *bucket) getHits(key string) int64 {

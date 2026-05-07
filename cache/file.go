@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dgraph-io/ristretto"
@@ -47,7 +48,7 @@ func NewFile(maxSize int64, opts FileOptions) (*file, error) {
 	c := &file{
 		maxInstanceSize: opts.MaxInstanceSize,
 		logger:          opts.Logger,
-		popularFiles:    popular.New(*opts.SkipFirstCalls, time.Hour*24*30),
+		popularFiles:    popular.New(*opts.SkipFirstCalls+1, time.Hour*24*30),
 	}
 
 	fr, err := newFileResolver(opts.RootPath, opts.CopyBufferSize, opts.CopyBufferWidth)
@@ -87,14 +88,14 @@ func (c *file) Stats() CacheStats {
 	return CacheStats{
 		Bytes:     c.cache.Metrics.CostAdded() - c.cache.Metrics.CostEvicted(),
 		Items:     c.cache.Metrics.KeysAdded() - c.cache.Metrics.KeysEvicted(),
-		Gets:      c.cache.Metrics.GetsKept() + c.cache.Metrics.GetsDropped(),
-		Hits:      c.cache.Metrics.GetsKept() + c.cache.Metrics.GetsDropped(),
+		Gets:      c.cache.Metrics.Hits() + c.cache.Metrics.Misses(),
+		Hits:      c.cache.Metrics.Hits(),
 		Evictions: c.cache.Metrics.KeysEvicted(),
 	}
 }
 
 func (c *file) restoreFiles() {
-	fileCh := make(chan fileValue)
+	fileCh := make(chan walkedFile)
 	go func() {
 		err := c.fileResolver.walk(fileCh)
 		if err != nil {
@@ -103,12 +104,12 @@ func (c *file) restoreFiles() {
 	}()
 
 	var filesAdded int64
-	for file := range fileCh {
-		ok := c.cache.Set(filepath.Base(file.filePath), file, file.size)
+	for entry := range fileCh {
+		ok := c.cache.Set(entry.key, entry.file, entry.file.size)
 		if !ok {
-			err := file.delete()
+			err := entry.file.delete()
 			if err != nil {
-				c.logger.Errorf("delete file %s error: %s", file.filePath, err.Error())
+				c.logger.Errorf("delete file %s error: %s", entry.file.filePath, err.Error())
 			}
 			continue
 		}
@@ -259,23 +260,21 @@ type fileResolver struct {
 }
 
 func (f *fileResolver) exists(key string) (io.ReadCloser, bool) {
-	rc, writer, err := f.tmpCache.Get(key)
+	file, err := os.Open(filepath.Join(f.fileRoot, getFilePath(key)))
 	if err != nil {
 		return nil, false
 	}
-
-	if writer != nil {
-		//TODO log errors
-		writer.Close()
-		rc.Close()
-		f.tmpCache.Remove(key)
-		return nil, false
-	}
-
-	return rc, true
+	return file, true
 }
 
-func (f *fileResolver) walk(fileCh chan<- fileValue) error {
+// walkedFile is the unit produced by walk: the on-disk fileValue plus the
+// original cache key recovered from the path layout.
+type walkedFile struct {
+	key  string
+	file fileValue
+}
+
+func (f *fileResolver) walk(fileCh chan<- walkedFile) error {
 	defer func() { close(fileCh) }()
 
 	err := filepath.Walk(f.fileRoot, func(path string, info os.FileInfo, err error) error {
@@ -287,9 +286,18 @@ func (f *fileResolver) walk(fileCh chan<- fileValue) error {
 			return nil
 		}
 
-		fileCh <- fileValue{
-			filePath: path,
-			size:     info.Size(),
+		key, ok := keyFromPath(f.fileRoot, path)
+		if !ok {
+			// Unexpected layout — skip rather than restore under a wrong key.
+			return nil
+		}
+
+		fileCh <- walkedFile{
+			key: key,
+			file: fileValue{
+				filePath: path,
+				size:     info.Size(),
+			},
 		}
 		return nil
 	})
@@ -297,8 +305,22 @@ func (f *fileResolver) walk(fileCh chan<- fileValue) error {
 	return err
 }
 
+// keyFromPath recovers the cache key from a path produced by getFilePath.
+// Layout is <fileRoot>/<sha[:2]>/<sha[2:4]>/<key>; key may itself contain '/'.
+func keyFromPath(fileRoot, path string) (string, bool) {
+	rel, err := filepath.Rel(fileRoot, path)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.SplitN(filepath.ToSlash(rel), "/", 3)
+	if len(parts) < 3 {
+		return "", false
+	}
+	return parts[2], true
+}
+
 func (f *fileResolver) delete(key string) error {
-	if err := os.Remove(filepath.Join(getFilePath(key), key)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(f.fileRoot, getFilePath(key))); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
@@ -328,7 +350,7 @@ func (f *fileResolver) overTemp(key string, r io.Reader, w io.WriteCloser) (file
 	bullPool := f.buffPool.Get()
 	defer func() {
 		f.buffPool.Put(bullPool)
-		err := multierr.Append(err, errors.WithMessagef(w.Close(), "close tmp file writer"))
+		err = multierr.Append(err, errors.WithMessagef(w.Close(), "close tmp file writer"))
 		err = multierr.Append(err, errors.WithMessagef(f.tmpCache.Remove(key), "remove tmp file key: %s", key))
 	}()
 

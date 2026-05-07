@@ -76,8 +76,8 @@ func (c *memory) Stats() CacheStats {
 	return CacheStats{
 		Bytes:     c.cache.Metrics.CostAdded() - c.cache.Metrics.CostEvicted(),
 		Items:     c.cache.Metrics.KeysAdded() - c.cache.Metrics.KeysEvicted(),
-		Gets:      c.cache.Metrics.GetsKept() + c.cache.Metrics.GetsDropped(),
-		Hits:      c.cache.Metrics.GetsKept() + c.cache.Metrics.GetsDropped(),
+		Gets:      c.cache.Metrics.Hits() + c.cache.Metrics.Misses(),
+		Hits:      c.cache.Metrics.Hits(),
 		Evictions: c.cache.Metrics.KeysEvicted(),
 	}
 }
@@ -94,8 +94,6 @@ func (c *memory) Add(key string, value *view.View) {
 }
 
 func (c *memory) AddForce(key string, value *view.View) {
-	defer value.Close()
-
 	if buf, ok := value.BytesBuffer(); ok {
 		c.setValue(key, buf.Bytes(), int64(buf.Len()), true)
 		return

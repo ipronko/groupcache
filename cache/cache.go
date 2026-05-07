@@ -7,6 +7,9 @@ import (
 	"github.com/ipronko/groupcache/view"
 )
 
+// ViewCache stores values keyed by string. Implementations may consume the
+// supplied *view.View asynchronously, but the caller retains ownership of the
+// value and is responsible for calling value.Close().
 type ViewCache interface {
 	Add(key string, value *view.View)
 	AddForce(key string, value *view.View)
