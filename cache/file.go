@@ -137,13 +137,27 @@ func (c *file) set(key string, value *view.View, force bool) {
 		return
 	}
 
-	oldReader := value.SwapReader(reader)
 	if writer == nil {
+		// Another goroutine owns the write for this key; we only get a reader.
+		// Hand it to the View as-is (no error propagation possible — the writer
+		// goroutine lives in another invocation).
+		oldReader := value.SwapReader(reader)
 		if rc, ok := oldReader.(io.ReadCloser); ok {
 			rc.Close()
 		}
 		return
 	}
+
+	// Wrap the fscache reader so the consumer sees the writer goroutine's
+	// terminal error after EOF instead of silently truncating on origin errors.
+	done := make(chan struct{})
+	var streamErr error
+	wrapped := &streamingReader{
+		r:     reader,
+		done:  done,
+		errFn: func() error { return streamErr },
+	}
+	oldReader := value.SwapReader(wrapped)
 
 	go func() {
 		defer func() {
@@ -154,7 +168,15 @@ func (c *file) set(key string, value *view.View, force bool) {
 
 		file, err := c.fileResolver.overTemp(key, oldReader, writer)
 		if err != nil {
-			c.fileResolver.delete(key)
+			streamErr = err
+		}
+		// Release any consumer parked on EOF before doing further bookkeeping.
+		close(done)
+
+		if err != nil {
+			if delErr := c.fileResolver.delete(key); delErr != nil {
+				c.logger.Errorf("delete %s file err: %s", key, delErr.Error())
+			}
 			if !errors.Is(err, context.DeadlineExceeded) &&
 				!errors.Is(err, context.Canceled) &&
 				!errors.Is(err, io.ErrClosedPipe) {
@@ -163,17 +185,37 @@ func (c *file) set(key string, value *view.View, force bool) {
 			return
 		}
 
-		ok := c.setValue(key, file, file.size, force)
-		if !ok {
-			err := c.fileResolver.delete(key)
-			if err != nil {
-				c.logger.Errorf("delete %s file err: %s", key, err.Error())
-				return
+		if !c.setValue(key, file, file.size, force) {
+			if delErr := c.fileResolver.delete(key); delErr != nil {
+				c.logger.Errorf("delete %s file err: %s", key, delErr.Error())
 			}
 		}
 	}()
+}
 
-	return
+// streamingReader wraps the fscache reader handed to the View so that a
+// terminal error from the writer goroutine surfaces to the consumer. Without
+// it, an origin error mid-stream just closes the writer and the consumer sees
+// EOF on a truncated body with no indication anything went wrong.
+type streamingReader struct {
+	r     io.ReadCloser
+	done  <-chan struct{}
+	errFn func() error
+}
+
+func (s *streamingReader) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	if err == io.EOF {
+		<-s.done
+		if e := s.errFn(); e != nil {
+			return n, e
+		}
+	}
+	return n, err
+}
+
+func (s *streamingReader) Close() error {
+	return s.r.Close()
 }
 
 func (c *file) setValue(key string, val fileValue, len int64, force bool) bool {
