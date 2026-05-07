@@ -45,24 +45,18 @@ type nopLogger struct{}
 func (l nopLogger) Errorf(_ string, _ ...interface{}) {}
 func (l nopLogger) Infof(_ string, _ ...interface{})  {}
 
+// getCache constructs the underlying ristretto cache. evictFunc is invoked
+// for every value removal — eviction by the policy, explicit Del, Set
+// replacing an existing key, and rejection — so callers can reliably tear
+// down side state (e.g. files on disk) keyed by the value.
 func getCache(maxSize int64, opts Options, evictFunc func(value interface{})) (*ristretto.Cache, error) {
-	rCache := new(ristretto.Cache)
-
 	config := &ristretto.Config{
 		NumCounters: opts.NumCacheCounters,
 		MaxCost:     maxSize,
 		Metrics:     !opts.DisableCacheMetrics,
 		BufferItems: 64,
+		OnExit:      evictFunc,
 	}
 
-	config.OnEvict = func(key, conflict uint64, value interface{}, cost int64) {
-		evictFunc(value)
-	}
-
-	rCache, err := ristretto.NewCache(config)
-	if err != nil {
-		return nil, err
-	}
-
-	return rCache, nil
+	return ristretto.NewCache(config)
 }

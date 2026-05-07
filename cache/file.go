@@ -255,11 +255,10 @@ func (c *file) Get(key string) (*view.View, bool) {
 }
 
 func (c *file) Remove(key string) {
+	// ristretto's OnExit callback (wired in getCache) fires synchronously from
+	// Del with the previous value, which drives fileValue.delete() — so the
+	// disk file is reaped without an explicit fileResolver.delete here.
 	c.cache.Del(key)
-	err := c.fileResolver.delete(key)
-	if err != nil {
-		c.logger.Errorf("delete %s key err: %s", key, err)
-	}
 }
 
 const (
